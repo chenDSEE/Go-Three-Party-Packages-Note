@@ -26,6 +26,7 @@ func main() {
 	mux.GET("/hello/:Params/post-id/:id", helloHandler)
 
 	// http.Handler 兼容
+	// curl -i http://localhost:8080/adapter/Params
 	mux.HandlerFunc("GET", "/adapter/:Params", SDKHandler)
 
 	server := http.Server{

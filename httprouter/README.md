@@ -4,6 +4,22 @@
 
 
 
+## How to run demo
+
+```bash
+in server side:
+# go build main.go
+# ./main
+
+in client side:
+# curl -i http://localhost:8080/hello/aimer/post-id/123456
+# curl -i http://localhost:8080/adapter/Params
+```
+
+
+
+
+
 ## 标准库的 `http.ServeMux` 缺陷
 
 - 当 URL 存在参数的时候，没办法很好的使用。
