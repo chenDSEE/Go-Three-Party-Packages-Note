@@ -19,8 +19,8 @@ in client side:
 
 
 
-
-## 标准库的 `http.ServeMux` 缺陷
+## why *httpRouter* package
+### 标准库的 `http.ServeMux` 缺陷
 
 - 当 URL 存在参数的时候，没办法很好的使用。
 - `http.ServeMux` 的 URL 通常只能是固定的，当 URL 里面存在可变化的参数时，将很难发挥作用。
