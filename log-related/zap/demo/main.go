@@ -1,10 +1,12 @@
 package main
 
 import (
-	"main/zap"
+	"go.uber.org/zap"
+	"time"
 )
 
 func main() {
+	url := "url-string"
 	logger, _ := zap.NewProduction()
 	defer logger.Sync() // flushes buffer, if any
 	sugar := logger.Sugar()
