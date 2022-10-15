@@ -14,7 +14,10 @@ security, (backwards compatible) bug fixes, and performance (where we are
 limited by the interface). 
 
 目前 logrus 的性能受限于 interface
-（TODO: 具体是指？）
+
+（TODO(DONE): 具体是指？
+`WithFields()` 中大量使用了 reflect 包，导致的性能低下
+）
 
 I believe Logrus' biggest contribution is to have played a part in today's
 widespread use of structured logging in Golang. There doesn't seem to be a

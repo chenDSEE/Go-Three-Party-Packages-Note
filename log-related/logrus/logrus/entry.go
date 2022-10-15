@@ -41,10 +41,14 @@ var ErrorKey = "error"
 // the fields passed with WithField{,s}. It's finally logged when Trace, Debug,
 // Info, Warn, Error, Fatal or Panic is called on it. These objects can be
 // reused and passed around as much as you wish to avoid field duplication.
+// Entry 是实际进行日志记录的实体，而且这个 Entry 实体是跟具体的 Fields 绑定的
+// 为了提高性能，这个 Entry 是可以重复利用，甚至是 pass around 的
 type Entry struct {
+	// 因为 Entry 并没有 io.Writer, 所以还是要记录自己属于哪一个 logrus.Logger 的
 	Logger *Logger
 
 	// Contains all the fields set by the user.
+	// 跟着这个 Entry 走的数据（相当于 session 的唯一标识，每次都把它们打印出来）
 	Data Fields
 
 	// Time at which the log entry was created
@@ -64,6 +68,7 @@ type Entry struct {
 	Buffer *bytes.Buffer
 
 	// Contains the context set by the user. Useful for hook processing etc.
+	// 使用者往 hook 传递 session 信息的手段
 	Context context.Context
 
 	// err may contain a field formatting error
@@ -78,6 +83,7 @@ func NewEntry(logger *Logger) *Entry {
 	}
 }
 
+// deep copy for logrus.Entry
 func (entry *Entry) Dup() *Entry {
 	data := make(Fields, len(entry.Data))
 	for k, v := range entry.Data {
@@ -122,15 +128,44 @@ func (entry *Entry) WithField(key string, value interface{}) *Entry {
 }
 
 // Add a map of fields to the Entry.
+// 填充每一个 Entry 的 Data 这个 map（做到 struct 化的第一步）
+// 返回 *Entry 是为了能够进行链式调用，方便后续追加 Message 之类的
 func (entry *Entry) WithFields(fields Fields) *Entry {
-	data := make(Fields, len(entry.Data)+len(fields))
+	// Q&A(DONE): 为什么要创建一个临时 logrus.Fields map ? 而且还做了一个 deep copy
+	// 因为这个函数返回的是一个新的 Entry，这个新的 Entry 是基于原始 receiver 的 Entry 的基础上
+	// 再补充新的 param 而构成的
+	// 所以整个函数的基调是：在原有的基础上，追加 fields param 带来的新变化
+	// Q&A(DONE): 为什么要采用这种如此慢的方式每次都构建新的 Entry ？
+	// 这其实就涉及到了，Entry 这玩意的定位问题:
+	// 1. Entry 的存在，很大程度上是为了减少 reflact 的使用（因为 reflact 存在相当大的性能问题），
+	//    而使用的一个中间层概念
+	// 2. 鉴于 Go 擅长的是后端，基本上是基于 request-response 的模型构建的后端服务，
+	//    那么每一次 request 只进行一次 reflact 解析，这个 request scope 内重复利用这个 Entry，
+	//    就可以最大程度的规避 reflact 的性能问题了（类似于每一个 HttpHandler 就只解析一次 Context）
+	// 3. 记录每个 session、request scope 必须要有的标识、跟踪信息（session-id、trace-id、ip-port、mac-address 之类的）
+	//    这是在查看日志时，按 session 查看的必要信息。
+	// Q&A(DONE): 为什么每次 data 都是重新分配且 deep copy？
+	// 1. 因为 Entry 可能会被重复利用，但是又没有相应的 reset 操作，所以要重新创建 Fields map
+	// 2. 避免 rehash，毕竟改动 Entry.data 的可能性还是很低的（显然一次性更新更好）
+	// 3. 真正的原因是这个函数的旧注释：https://github.com/sirupsen/logrus/pull/1229
+	//    This function is not declared with a pointer value because otherwise
+	//    race conditions will occur when using multiple goroutines
+	//    这个函数本来的 receiver 是变量，而不是指针，因为 logrus 采用 COW 的方案来避免并发问题！
+	//    所以你才会看到总是分配新的 logrus.Fields, logrus.Entry
+	data := make(Fields, len(entry.Data)+len(fields)) // cap = 旧的 + 新的
 	for k, v := range entry.Data {
+		// NOTE: copy on write to avoid race conditions
+		// deep copy
 		data[k] = v
 	}
+
+	/* check type and generate key and value as field */
 	fieldErr := entry.err
 	for k, v := range fields {
 		isErrField := false
 		if t := reflect.TypeOf(v); t != nil {
+			// 不支持函数对象，也不支持函数指针
+			// 因为这两个 printf 出来也是没有意义的
 			switch {
 			case t.Kind() == reflect.Func, t.Kind() == reflect.Ptr && t.Elem().Kind() == reflect.Func:
 				isErrField = true
@@ -144,9 +179,17 @@ func (entry *Entry) WithFields(fields Fields) *Entry {
 				fieldErr = tmp
 			}
 		} else {
+			// 其实甚至可以更粗暴，把这个 data 构建成 string
+			// 然后 Entry 直接缓存 string 数据
 			data[k] = v
 		}
 	}
+
+	// 返回的是一个新的 Entry
+	// 个人感觉这里创建的 Entry 不被 pool buf 起来的话，
+	// 其实也就是暗示我们：不要满天飞的调用 WithFields() 函数，
+	// 一个 request scope 调用一两次就好了
+	// NOTE: 往现有 Entry 加字段的时候，要像 slice 那样，总是接住新的 Entry 来用
 	return &Entry{Logger: entry.Logger, Data: data, Time: entry.Time, err: fieldErr, Context: entry.Context}
 }
 
@@ -212,15 +255,24 @@ func getCaller() *runtime.Frame {
 	return nil
 }
 
+// pass by value, 不带锁也是没有关系的？不算严格安全吧，但是一般不会动态改
+// 就算改了，这里也是全部必要的字段都检查了，至少这时候是不会有问题的
+// 实话说，logrus 里面只有 formatter 调用了这个函数，formatter 调用之前都是上锁的，所以没有并发问题
 func (entry Entry) HasCaller() (has bool) {
 	return entry.Logger != nil &&
 		entry.Logger.ReportCaller &&
 		entry.Caller != nil
 }
 
+// 正式输出
 func (entry *Entry) log(level Level, msg string) {
 	var buffer *bytes.Buffer
 
+	// Q&A(DONE): 为何要 Dup() 出来？
+	// 1. COW 确保并发安全（level 可能修改），而且 level 参数也是通过 atomic 读取出来的
+	// 2. 下面读取 entry 字段的地方太多了，比起加锁，还不如直接 copy 出来
+	// 3. 其实这时候 deep copy 出来一个 newEntry，更多是是利用这个 newEntry 来记录这一个瞬间的信息（时间、Message）
+	//    同时这样可以尽可能减小加锁的范围，缓解并发导致的性能下降
 	newEntry := entry.Dup()
 
 	if newEntry.Time.IsZero() {
@@ -230,21 +282,25 @@ func (entry *Entry) log(level Level, msg string) {
 	newEntry.Level = level
 	newEntry.Message = msg
 
-	newEntry.Logger.mu.Lock()
+	// Entry 本身并没有 fd 或者是输出方向，所以也不需要锁，而是使用 Logger 里面的锁
+	newEntry.Logger.mu.Lock() // ReportCaller，bufPool 是上层 Logger 的公共资源，所以要加锁访问
 	reportCaller := newEntry.Logger.ReportCaller
 	bufPool := newEntry.getBufferPool()
+	// 因为 bufPool 内部也有锁，所以可以解开 Logger.mu 这个大的资源锁
+	// 另外，避免同时锁住多个不同的锁，是避免死锁的重要手段
 	newEntry.Logger.mu.Unlock()
 
 	if reportCaller {
+		// 拿栈帧是会变慢的
 		newEntry.Caller = getCaller()
 	}
 
-	newEntry.fireHooks()
+	newEntry.fireHooks() // 调用一下 callback 而已
 	buffer = bufPool.Get()
 	defer func() {
 		newEntry.Buffer = nil
-		buffer.Reset()
-		bufPool.Put(buffer)
+		buffer.Reset()      // 个人感觉跟下面的 buffer.Reset() 是重复的，有一个可以去掉
+		bufPool.Put(buffer) // 减轻 GC 压力
 	}()
 	buffer.Reset()
 	newEntry.Buffer = buffer
@@ -270,7 +326,7 @@ func (entry *Entry) getBufferPool() (pool BufferPool) {
 
 func (entry *Entry) fireHooks() {
 	var tmpHooks LevelHooks
-	entry.Logger.mu.Lock()
+	entry.Logger.mu.Lock() // 因为 Logger.Hooks 是共享资源，deep copy 出来就可以解锁了
 	tmpHooks = make(LevelHooks, len(entry.Logger.Hooks))
 	for k, v := range entry.Logger.Hooks {
 		tmpHooks[k] = v
@@ -283,14 +339,19 @@ func (entry *Entry) fireHooks() {
 	}
 }
 
+// 全程加锁输出日志
 func (entry *Entry) write() {
 	entry.Logger.mu.Lock()
 	defer entry.Logger.mu.Unlock()
-	serialized, err := entry.Logger.Formatter.Format(entry)
+	// 格式化字符串
+	// Q&A(DONE): 为什么这个也要加锁？
+	// 因为 formatter 会访问 Logger 里面的资源，所以也得加锁。比如：entry.HasCaller()
+	serialized, err := entry.Logger.Formatter.Format(entry) // JSONFormatter/TextFormatter
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to obtain reader, %v\n", err)
 		return
 	}
+	// 正式输出（通过 io.Writer 输出内容而已，没有什么特别的）
 	if _, err := entry.Logger.Out.Write(serialized); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to write to log, %v\n", err)
 	}
@@ -300,8 +361,8 @@ func (entry *Entry) write() {
 // Warning: using Log at Panic or Fatal level will not respectively Panic nor Exit.
 // For this behaviour Entry.Panic or Entry.Fatal should be used instead.
 func (entry *Entry) Log(level Level, args ...interface{}) {
-	if entry.Logger.IsLevelEnabled(level) {
-		entry.log(level, fmt.Sprint(args...))
+	if entry.Logger.IsLevelEnabled(level) { // 简单的显示开关
+		entry.log(level, fmt.Sprint(args...)) // 先利用 fmt.Sprint 或者是 fmt.Sprintf，跟标准库的 log 思路是一样的
 	}
 }
 

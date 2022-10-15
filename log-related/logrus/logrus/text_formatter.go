@@ -131,11 +131,14 @@ func (f *TextFormatter) isColored() bool {
 
 // Format renders a single log entry
 func (f *TextFormatter) Format(entry *Entry) ([]byte, error) {
+	// Q&A(DONE): 为何又又又 copy 一次？创建的时候还不带 length
+	// 因为 prefixFieldClashes 会改动 data，所以只能再 copy 一次了
+	// 实话说，这个逻辑是可以优化一下的，毕竟 entry 都是 COW 的风格了，整天 access Logger 的资源，导致并发资源访问加锁
 	data := make(Fields)
 	for k, v := range entry.Data {
 		data[k] = v
 	}
-	prefixFieldClashes(data, f.FieldMap, entry.HasCaller())
+	prefixFieldClashes(data, f.FieldMap, entry.HasCaller()) // 每次都重复设置，真的是有点多余，有点过于灵活了
 	keys := make([]string, 0, len(data))
 	for k := range data {
 		keys = append(keys, k)
@@ -143,6 +146,7 @@ func (f *TextFormatter) Format(entry *Entry) ([]byte, error) {
 
 	var funcVal, fileVal string
 
+	// 一个个 unit 的信息 key，往 fixedKeys 暂时放一下
 	fixedKeys := make([]string, 0, 4+len(data))
 	if !f.DisableTimestamp {
 		fixedKeys = append(fixedKeys, f.FieldMap.resolve(FieldKeyTime))
@@ -219,9 +223,9 @@ func (f *TextFormatter) Format(entry *Entry) ([]byte, error) {
 			case key == f.FieldMap.resolve(FieldKeyFile) && entry.HasCaller():
 				value = fileVal
 			default:
-				value = data[key]
+				value = data[key] // WithFields() 填入的字段
 			}
-			f.appendKeyValue(b, key, value)
+			f.appendKeyValue(b, key, value) // 生成最终的 []byte
 		}
 	}
 
@@ -229,6 +233,7 @@ func (f *TextFormatter) Format(entry *Entry) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+// 也就往前端输出的时候，可以加加颜色了，跟 echo 命令加颜色的原理差不多
 func (f *TextFormatter) printColored(b *bytes.Buffer, entry *Entry, keys []string, data Fields, timestampFormat string) {
 	var levelColor int
 	switch entry.Level {

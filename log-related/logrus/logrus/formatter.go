@@ -1,6 +1,8 @@
 package logrus
 
-import "time"
+import (
+	"time"
+)
 
 // Default key names for the default fields
 const (
@@ -24,6 +26,7 @@ const (
 // `entry.Data`. Format is expected to return an array of bytes which are then
 // logged to `logger.Out`.
 type Formatter interface {
+	// 将 logrus.Entry 中记录的信息以 entry 为单位进行格式化，生成 byte[] 数据
 	Format(*Entry) ([]byte, error)
 }
 
@@ -39,6 +42,7 @@ type Formatter interface {
 //
 // It's not exported because it's still using Data in an opinionated way. It's to
 // avoid code duplication between the two default formatters.
+// 为内置 key name 预留位置，并为用户写入的 key name 重命名为 fields.xxxx
 func prefixFieldClashes(data Fields, fieldMap FieldMap, reportCaller bool) {
 	timeKey := fieldMap.resolve(FieldKeyTime)
 	if t, ok := data[timeKey]; ok {

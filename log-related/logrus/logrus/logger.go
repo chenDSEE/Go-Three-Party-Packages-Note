@@ -32,6 +32,7 @@ type Logger struct {
 	Formatter Formatter
 
 	// Flag for whether to log caller info (off by default)
+	// 是否打印函数名、行号，因为比较耗性能，所以默认是关闭的
 	ReportCaller bool
 
 	// The logging level the logger should log at. This is typically (and defaults
@@ -39,11 +40,15 @@ type Logger struct {
 	// logged.
 	Level Level
 	// Used to sync writing to the log. Locking is enabled by Default
+	// 把 mutex disabled 的检测也封装进这个 struct 里面，省的到处检查
 	mu MutexWrap
 	// Reusable empty entry
 	entryPool sync.Pool
+
 	// Function to exit the application, defaults to `os.Exit()`
+	// 遇上 logrus.Fatal() 的时候，做优雅退出。回调函数
 	ExitFunc exitFunc
+
 	// The buffer pool used to format the log. If it is nil, the default global
 	// buffer pool will be used.
 	BufferPool BufferPool
@@ -96,15 +101,30 @@ func New() *Logger {
 }
 
 func (logger *Logger) newEntry() *Entry {
+	// NOTE: 实话说，这个 Entry 也就 logrus.Infof() 这样的时候有点用
+	// 因为 Entry.WithFields() 实际上返回的又是一个新的 Entry，而且是不从 pool 拿的 Entry
 	entry, ok := logger.entryPool.Get().(*Entry)
 	if ok {
+		// 因为 logrus 中所有 Logger 都是没有设置 entryPool 的
+		// 这时候，entryPool.Get() 返回的是 nil，所以断言就会失败
+		// 然后再由这个函数进行一次 NewEntry()
+		// 实际上，这一点是不必要的，可以设置 entryPool.New 这个 field（闭包传进去就好了）
 		return entry
 	}
+
+	// Entry struct 自己仅仅是一个普通的 Entry struct
+	// 并不需要理会是否应该使用 pool 作为缓存，
+	// 是否利用缓存这件事，是上层决定的，所有交由 Logger struct 来做 pool 缓存
 	return NewEntry(logger)
 }
 
 func (logger *Logger) releaseEntry(entry *Entry) {
-	entry.Data = map[string]interface{}{}
+	// 这确实是最快的方式，只不过把释放、reset 的压力扔给 GC 了而已
+	entry.Data = map[string]interface{}{} // 每次重用，这个 logrus.Entry.Data 是不能重用的
+
+	// Q&A(DONE): 为什么其他字段不 reset ？
+	// 无所谓，在 Entry 的每一个 method 内部都是重新分配的（省的 rehash）
+	// 你可以参考 Entry.WithFields() 函数
 	logger.entryPool.Put(entry)
 }
 
@@ -120,6 +140,10 @@ func (logger *Logger) WithField(key string, value interface{}) *Entry {
 
 // Adds a struct of fields to the log entry. All it does is call `WithField` for
 // each `Field`.
+// NOTE: 注意看，WithFields() 是一个 method（哪怕 global 的 WithFields()） 函数最后也是通过
+// std.WithFields() 的
+// 为什么要这样？因为每一个 Entry 是不具有 io.Writer 的，而 io.Writer 是 logrus.Logger 的
+// 其实也是暗示了: Entry 离开了 Logger 其实是没有意义的
 func (logger *Logger) WithFields(fields Fields) *Entry {
 	entry := logger.newEntry()
 	defer logger.releaseEntry(entry)
@@ -376,6 +400,7 @@ func (logger *Logger) AddHook(hook Hook) {
 }
 
 // IsLevelEnabled checks if the log level of the logger is greater than the level param
+// log 等价检查
 func (logger *Logger) IsLevelEnabled(level Level) bool {
 	return logger.level() >= level
 }

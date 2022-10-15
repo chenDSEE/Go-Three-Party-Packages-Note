@@ -7,7 +7,7 @@ import (
 
 func init() {
 	// Log as JSON instead of the default ASCII formatter.
-	logrus.SetFormatter(&logrus.JSONFormatter{})
+	//logrus.SetFormatter(&logrus.JSONFormatter{})
 
 	// Output to stdout instead of the default stderr
 	// Can be any io.Writer, see below for File example
@@ -16,8 +16,8 @@ func init() {
 	// Only logrus the warning severity or above.
 	logrus.SetLevel(logrus.WarnLevel)
 
-    // record funtcion name and file name, line number
-    // 性能会有一定的损耗
+	// record funtcion name and file name, line number
+	// 性能会有一定的损耗
 	logrus.SetReportCaller(true)
 }
 
@@ -39,6 +39,7 @@ func main() {
 
 	// A common pattern is to re-use fields between logging statements by re-using
 	// the logrus.Entry returned from WithFields()
+	// contextLogger 实际上是一个 Entry，到时候 GC 回收就完事了
 	contextLogger := logrus.WithFields(logrus.Fields{
 		"common": "this is a common field",
 		"other":  "I also should be logged always",
