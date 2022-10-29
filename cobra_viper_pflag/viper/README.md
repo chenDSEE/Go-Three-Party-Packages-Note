@@ -44,12 +44,12 @@ Viper is a complete configuration solution for Go applications including 12-Fact
 to work within an application, and can handle all types of configuration needs
 and formats. It supports:
 
-* setting defaults
+* (设置默认参数)setting defaults
 * reading from JSON, TOML, YAML, HCL, envfile and Java properties config files
-* live watching and re-reading of config files (optional)
-* reading from environment variables
+* (配置文件重新加载)live watching and re-reading of config files (optional)
+* (读取环境变量)reading from environment variables
 * reading from remote config systems (etcd or Consul), and watching changes
-* reading from command line flags
+* (支持命令行参数)reading from command line flags
 * reading from buffer
 * setting explicit values
 
@@ -66,20 +66,20 @@ Viper does the following for you:
 
 1. Find, load, and unmarshal a configuration file in JSON, TOML, YAML, HCL, INI, envfile or Java properties formats.
 2. Provide a mechanism to set default values for your different configuration options.
-3. Provide a mechanism to set override values for options specified through command line flags.
+3. (CLI flag 优先级更高，可以覆盖配置文件中的值)Provide a mechanism to set override values for options specified through command line flags.
 4. Provide an alias system to easily rename parameters without breaking existing code.
 5. Make it easy to tell the difference between when a user has provided a command line or config file which is the same as the default.
 
 Viper uses the following precedence order. Each item takes precedence over the item below it:
 
- * explicit call to `Set`
- * flag
- * env
- * config
- * key/value store
- * default
+ * explicit call to `Set`（在代码中写死）
+ * flag（临时更改某一两个配置项）
+ * env（敏感配置内容）
+ * config（普通的配置文件）
+ * key/value store（远端的 key-value 存储系统，比如 etcd）
+ * default（代码中设置的默认值）
 
-**Important:** Viper configuration keys are case insensitive.
+**Important:** Viper configuration keys are **case insensitive（key 是大小写敏感的）**（个人觉得可以关闭）.
 There are ongoing discussions about making that optional.
 
 
@@ -105,7 +105,7 @@ Viper requires minimal configuration so it knows where to look for config files.
 Viper supports JSON, TOML, YAML, HCL, INI, envfile and Java Properties files. Viper can search multiple paths, but
 currently a single Viper instance only supports a single configuration file.
 Viper does not default to any configuration search paths leaving defaults decision
-to an application.
+to an application.（一个 `Viper` instance 只支持一个配置文件，但是你可以在指定多个搜索路径。多配置文件看起来是要使用多个 `Viper` instance 的）
 
 Here is an example of how to use Viper to search for and read a configuration file.
 None of the specific paths are required, but at least one path should be provided
@@ -141,6 +141,8 @@ if err := viper.ReadInConfig(); err != nil {
 
 ### Writing Config Files
 
+能够在运行时，修改部分配置项。据比如：redis。在运行的过程中，跟其他 redis 建立连接关系，然后将对端的 ip+port 记录在自己的配置文件中。这样当自己因各种原因重启后，依然能够根据配置文件中记录的对端 ip+port，重新建立连接（不必被动等待对端的连接）
+
 Reading from config files is useful, but at times you want to store all modifications made at run time.
 For that, a bunch of commands are available, each with its own purpose:
 
@@ -162,6 +164,8 @@ viper.SafeWriteConfigAs("/path/to/my/.other_config")
 ```
 
 ### Watching and re-reading config files
+
+动态热加载，个人不建议开启，因为有些配置并不能动态热加载的（就比如监听的 ip + port）
 
 Viper supports the ability to have your application live read a config file while running.
 
@@ -186,6 +190,8 @@ viper.WatchConfig()
 Viper predefines many configuration sources such as files, environment
 variables, flags, and remote K/V store, but you are not bound to them. You can
 also implement your own required configuration source and feed it to viper.
+
+毕竟采用了 `io.Reader` 作为接口，可以做到这一点也是很正常的。方便我们自己定义数据源
 
 ```go
 viper.SetConfigType("yaml") // or viper.SetConfigType("YAML")
@@ -213,7 +219,7 @@ viper.Get("name") // this would be "steve"
 
 ### Setting Overrides
 
-These could be from a command line flag, or from your own application logic.
+These could be from a command line flag, or from your own application logic.（最高优先级配置：代码直接写死）
 
 ```go
 viper.Set("Verbose", true)
@@ -247,7 +253,7 @@ with ENV:
  * `AllowEmptyEnv(bool)`
 
 _When working with ENV variables, it’s important to recognize that Viper
-treats ENV variables as case sensitive._
+treats ENV variables as case sensitive._ 环境变量也是大小写敏感的
 
 Viper provides a mechanism to try to ensure that ENV variables are unique. By
 using `SetEnvPrefix`, you can tell Viper to use a prefix while reading from
@@ -261,6 +267,8 @@ the environment variable is case sensitive. If the ENV variable name is not prov
 Viper will automatically assume that the ENV variable matches the following format: prefix + "_" + the key name in ALL CAPS. When you explicitly provide the ENV variable name (the second parameter),
 it **does not** automatically add the prefix. For example if the second parameter is "id",
 Viper will look for the ENV variable "ID".
+
+通过 Viper 去读取环境变量的值，总是会去操作系统中重新读取，而不会 cache 在 Viper 中
 
 One important thing to recognize when working with ENV variables is that the
 value will be read each time it is accessed. Viper does not fix the value when

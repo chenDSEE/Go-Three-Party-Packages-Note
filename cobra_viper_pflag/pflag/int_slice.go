@@ -21,7 +21,7 @@ func newIntSliceValue(val []int, p *[]int) *intSliceValue {
 
 func (s *intSliceValue) Set(val string) error {
 	ss := strings.Split(val, ",")
-	out := make([]int, len(ss))
+	out := make([]int, len(ss)) // 注册时，slice 是可以不初始化的
 	for i, d := range ss {
 		var err error
 		out[i], err = strconv.Atoi(d)

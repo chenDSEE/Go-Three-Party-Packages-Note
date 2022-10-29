@@ -28,13 +28,13 @@ Cobra provides:
 * Automatically generated man pages for your application
 * Command aliases so you can change things without breaking them
 * The flexibility to define your own help, usage, etc.
-* Optional seamless integration with [viper](https://github.com/spf13/viper) for 12-factor apps
+* Optional seamless integration with [viper](https://github.com/spf13/viper) for 12-factor apps（viper, pflag, corba 三者可以自由的集成在一起）
 
 # Concepts
 
 Cobra is built on a structure of commands, arguments & flags.
 
-**Commands** represent actions, **Args** are things and **Flags** are modifiers for those actions.
+(cmd, flag, arg 直接的区别与联系)<font color=red>**Commands** represent actions, **Args** are things and **Flags** are modifiers for those actions.</font>
 
 The best applications read like sentences when used, and as a result, users
 intuitively know how to interact with them.
@@ -66,7 +66,7 @@ In the example above, 'server' is the command.
 
 ## Flags
 
-A flag is a way to modify the behavior of a command. Cobra supports
+A flag is a way to modify the behavior of a command（flag 是对 command 动作的调整）. Cobra supports
 fully POSIX-compliant flags as well as the Go [flag package](https://golang.org/pkg/flag/).
 A Cobra command can define flags that persist through to children commands
 and flags that are only available to that command.

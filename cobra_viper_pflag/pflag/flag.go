@@ -132,9 +132,13 @@ type ParseErrorsWhitelist struct {
 
 // NormalizedName is a flag name that has been normalized according to rules
 // for the FlagSet (e.g. making '-' and '_' equivalent).
+// 一般化的 flag-name, 这是由 pflag 的 Normalizing 功能所引入的
 type NormalizedName string
 
 // A FlagSet represents a set of defined flags.
+// 多个 Flag 的管理集合。因为 pflag 的具有很多不同的 flag 用法，实际上不同的用法，都会导致
+// FlagSet 这里不得不增加一个相应的管理结构体，
+// 如：FlagSet.formal，FlagSet.actual，FlagSet.orderedFormal，FlagSet.sortedFormal，FlagSet.shorthands 等等
 type FlagSet struct {
 	// Usage is the function called when an error occurs while parsing flags.
 	// The field is a function (not a method) that may be changed to point to
@@ -149,25 +153,35 @@ type FlagSet struct {
 	ParseErrorsWhitelist ParseErrorsWhitelist
 
 	name              string
-	parsed            bool
-	actual            map[NormalizedName]*Flag
-	orderedActual     []*Flag
+	parsed            bool // FlagSet.Parse() 调用的标识。基本没用，对应 FlagSet.Parsed()
 	sortedActual      []*Flag
-	formal            map[NormalizedName]*Flag
-	orderedFormal     []*Flag
+
+	// Q&A(DONE): actual 跟 formal 有什么区别？
+	// actual 是实际命令中输入了那些命令
+	// formal 是代码编写者写了哪些命令
+	actual            map[NormalizedName]*Flag
+	formal            map[NormalizedName]*Flag // 一般化的 flag-name 作为 key，Flag struct 作为 value
+
+	// 这些 ordered 是为了在不同场景下，采用不同的顺序进行遍历
+	orderedActual     []*Flag
+	orderedFormal     []*Flag // 按照 Flag 的注册顺序排列
 	sortedFormal      []*Flag
-	shorthands        map[byte]*Flag
-	args              []string // arguments after flags
+
+	shorthands        map[byte]*Flag // shorthand 简写 mapping to Flag struct
+	args              []string // arguments after flags（包含全部）
 	argsLenAtDash     int      // len(args) when a '--' was located when parsing, or -1 if no --
 	errorHandling     ErrorHandling
 	output            io.Writer // nil means stderr; use out() accessor
-	interspersed      bool      // allow interspersed option/non-option args
+	interspersed      bool      // allow interspersed option/non-option args(默认开启)
 	normalizeNameFunc func(f *FlagSet, name string) NormalizedName
 
-	addedGoFlagSets []*goflag.FlagSet
+	addedGoFlagSets []*goflag.FlagSet // 跟 Go 标准库中的 flag 兼容
 }
 
 // A Flag represents the state of a flag.
+// 当使用者调用了一堆 pflag 的函数对一个自己想要创建的 flag 进行描述之后
+// 最终所有的描述信息将会被整合成一个 pflag.Flag 在 pflag 内部进行流动
+// 因为 Flag struct 以及所有的 field 都是 public 的，所以你甚至可以自定义一个 Flag 让后加入 FlagSet 里面
 type Flag struct {
 	Name                string              // name as it appears on command line
 	Shorthand           string              // one-letter abbreviated flag
@@ -184,15 +198,23 @@ type Flag struct {
 
 // Value is the interface to the dynamic value stored in a flag.
 // (The default value is represented as a string.)
+// 将 int、int32、string 等等所有 flag 对应的值，都抽象为 pflag.Value interface，然后通过 FlagSet.VarP() 进行统一处理
+// Q&A(DONE): 解析 pflag.Value interface 的设计思路
+// 所有 flag value 在输入的那一瞬间起，必然是 string，
+// 那么 string --> 代码的过程则是 string 向不同类型的转换。
+// 而这之间的桥梁则是 Value interface
 type Value interface {
-	String() string
-	Set(string) error
+	String() string // 从具体的 Value 转换为 string
+
+	// 需要注意的是：Value.Set() 是要把相应的值，设置到相应变量的内存上面的
+	Set(string) error // FlagSet.Set() 针对 Flag 进行调用，为这个 Flag 进行 string 向 Value.Type() 的转换
 	Type() string
 }
 
 // SliceValue is a secondary interface to all flags which hold a list
 // of values.  This allows full control over the value of list flags,
 // and avoids complicated marshalling and unmarshalling to csv.
+// emmm, 这个 interface 实际是没有使用到的
 type SliceValue interface {
 	// Append adds the specified value to the end of the flag value list.
 	Append(string) error
@@ -271,6 +293,7 @@ func (f *FlagSet) SetOutput(output io.Writer) {
 // VisitAll visits the flags in lexicographical order or
 // in primordial order if f.SortFlags is false, calling fn for each.
 // It visits all flags, even those not set.
+// FlagSet 的遍历函数
 func (f *FlagSet) VisitAll(fn func(*Flag)) {
 	if len(f.formal) == 0 {
 		return
@@ -460,6 +483,8 @@ func (f *FlagSet) Set(name, value string) error {
 		return fmt.Errorf("no such flag -%v", name)
 	}
 
+	// 通过 interface 调用 intValue, stringValue 相应的转换函数
+	// 并复制到相应的变量内存上
 	err := flag.Value.Set(value)
 	if err != nil {
 		var flagName string
@@ -471,7 +496,7 @@ func (f *FlagSet) Set(name, value string) error {
 		return fmt.Errorf("invalid argument %q for %q flag: %v", value, flagName, err)
 	}
 
-	if !flag.Changed {
+	if !flag.Changed { // 是默认值，还是命令行设置的
 		if f.actual == nil {
 			f.actual = make(map[NormalizedName]*Flag)
 		}
@@ -685,6 +710,7 @@ func (f *FlagSet) FlagUsagesWrapped(cols int) string {
 			return
 		}
 
+		// flag 本身
 		line := ""
 		if flag.Shorthand != "" && flag.ShorthandDeprecated == "" {
 			line = fmt.Sprintf("  -%s, --%s", flag.Shorthand, flag.Name)
@@ -722,6 +748,7 @@ func (f *FlagSet) FlagUsagesWrapped(cols int) string {
 
 		line += usage
 		if !flag.defaultIsZeroValue() {
+			// 有设置默认值的话，打印出来
 			if flag.Value.Type() == "string" {
 				line += fmt.Sprintf(" (default %q)", flag.DefValue)
 			} else {
@@ -735,6 +762,7 @@ func (f *FlagSet) FlagUsagesWrapped(cols int) string {
 		lines = append(lines, line)
 	})
 
+	// 格式化输出布局
 	for _, line := range lines {
 		sidx := strings.Index(line, "\x00")
 		spacing := strings.Repeat(" ", maxlen-sidx)
@@ -818,6 +846,7 @@ func (f *FlagSet) Var(value Value, name string, usage string) {
 	f.VarP(value, name, "", usage)
 }
 
+// 把使用者输入的 flag-name、shorthand、usage 信息统统变成一个 pflag.Flag struct
 // VarPF is like VarP, but returns the flag created
 func (f *FlagSet) VarPF(value Value, name, shorthand, usage string) *Flag {
 	// Remember the default value as a string; it won't change.
@@ -828,7 +857,7 @@ func (f *FlagSet) VarPF(value Value, name, shorthand, usage string) *Flag {
 		Value:     value,
 		DefValue:  value.String(),
 	}
-	f.AddFlag(flag)
+	f.AddFlag(flag) // 将 Flag 放入 FlagSet 中
 	return flag
 }
 
@@ -839,22 +868,26 @@ func (f *FlagSet) VarP(value Value, name, shorthand, usage string) {
 
 // AddFlag will add the flag to the FlagSet
 func (f *FlagSet) AddFlag(flag *Flag) {
-	normalizedFlagName := f.normalizeFlagName(flag.Name)
+	/* long-name 的处理 */
+	normalizedFlagName := f.normalizeFlagName(flag.Name) // 对 flag-name 进行一般化（统一化）
 
+	// NOTE: 可以从一个 nil 的 map 中 read，但是不可以往一个 nil 的 map write
 	_, alreadyThere := f.formal[normalizedFlagName]
 	if alreadyThere {
+		// 不接受 flag 的 redefine
 		msg := fmt.Sprintf("%s flag redefined: %s", f.name, flag.Name)
 		fmt.Fprintln(f.out(), msg)
 		panic(msg) // Happens only if flags are declared with identical names
 	}
 	if f.formal == nil {
-		f.formal = make(map[NormalizedName]*Flag)
+		f.formal = make(map[NormalizedName]*Flag) // lazy 的初始化
 	}
 
 	flag.Name = string(normalizedFlagName)
 	f.formal[normalizedFlagName] = flag
 	f.orderedFormal = append(f.orderedFormal, flag)
 
+	/* short-name 的处理 */
 	if flag.Shorthand == "" {
 		return
 	}
@@ -951,13 +984,13 @@ func stripUnknownFlagValue(args []string) []string {
 
 func (f *FlagSet) parseLongArg(s string, args []string, fn parseFunc) (a []string, err error) {
 	a = args
-	name := s[2:]
+	name := s[2:] // 去掉 '--'
 	if len(name) == 0 || name[0] == '-' || name[0] == '=' {
 		err = f.failf("bad flag syntax: %s", s)
 		return
 	}
 
-	split := strings.SplitN(name, "=", 2)
+	split := strings.SplitN(name, "=", 2) // 可能有 "=", 也可能没有，但是都是拿 split[0]
 	name = split[0]
 	flag, exists := f.formal[f.normalizeFlagName(name)]
 
@@ -997,13 +1030,16 @@ func (f *FlagSet) parseLongArg(s string, args []string, fn parseFunc) (a []strin
 		return
 	}
 
-	err = fn(flag, value)
+	err = fn(flag, value) // FlagSet.Set()
 	if err != nil {
 		f.failf(err.Error())
 	}
 	return
 }
 
+// shorthands 可能的 case 有：
+// 1. -a
+// 2. -abc
 func (f *FlagSet) parseSingleShortArg(shorthands string, args []string, fn parseFunc) (outShorts string, outArgs []string, err error) {
 	outArgs = args
 
@@ -1011,7 +1047,7 @@ func (f *FlagSet) parseSingleShortArg(shorthands string, args []string, fn parse
 		return
 	}
 
-	outShorts = shorthands[1:]
+	outShorts = shorthands[1:] // 去掉 '-'
 	c := shorthands[0]
 
 	flag, exists := f.shorthands[c]
@@ -1060,16 +1096,18 @@ func (f *FlagSet) parseSingleShortArg(shorthands string, args []string, fn parse
 	}
 
 	if flag.ShorthandDeprecated != "" {
+		// 被舍弃的 flag
 		fmt.Fprintf(f.out(), "Flag shorthand -%s has been deprecated, %s\n", flag.Shorthand, flag.ShorthandDeprecated)
 	}
 
-	err = fn(flag, value)
+	err = fn(flag, value) // FlagSet.Set()
 	if err != nil {
 		f.failf(err.Error())
 	}
 	return
 }
 
+// 输入的 s 包含破折号
 func (f *FlagSet) parseShortArg(s string, args []string, fn parseFunc) (a []string, err error) {
 	a = args
 	shorthands := s[1:]
@@ -1085,26 +1123,50 @@ func (f *FlagSet) parseShortArg(s string, args []string, fn parseFunc) (a []stri
 	return
 }
 
+// 1. 从命令行输入的 []string 中，找到指定的是哪一个 Flag，
+// 2. 通过 parseFunc 将输入的 string 设置为 Flag.Value
 func (f *FlagSet) parseArgs(args []string, fn parseFunc) (err error) {
 	for len(args) > 0 {
+		/* 找到当前命令行中指定的 Flag */
 		s := args[0]
 		args = args[1:]
 		if len(s) == 0 || s[0] != '-' || len(s) == 1 {
 			if !f.interspersed {
+				// 异常输入，直接输出
 				f.args = append(f.args, s)
 				f.args = append(f.args, args...)
 				return nil
 			}
+
+			// 这个 flag 有多个输入值, 当前的 arg 是 value 之一
 			f.args = append(f.args, s)
 			continue
 		}
 
-		if s[1] == '-' {
+		if s[1] == '-' { // 长 flag，len(s) = 1 的情况已经被上面拦住了
 			if len(s) == 2 { // "--" terminates the flags
+				// https://www.gnu.org/software/libc/manual/html_node/Argument-Syntax.html:
+				// The argument -- terminates all options;
+				// any following arguments are treated as non-option arguments,
+				// even if they begin with a hyphen.
+				//
+				// man bash
+				// A  --  signals the end of options and disables further option processing.
+				// Any arguments after the -- are treated as filenames and arguments.
+				// An argument of - is equivalent to --.
+				//
+				// 标识所有 flag 的结束（K8S 的参数中就有这样的形式）
+				// 而在位于 -- 后面的字符串，是给接下来的命令用的
+				// 1. 所有 flag 都输入完了：docker run -it -- centos:8.1.1911 /bin/bash
+				//    docker run [OPTIONS] IMAGE [COMMAND] [ARG...]
+				//    -- 是 [OPTIONS] 跟 IMAGE 的分隔符
+				// 2. 后面的参数是给接下来的命令的：kubectl exec abc -c ddf -it -- sh
 				f.argsLenAtDash = len(f.args)
 				f.args = append(f.args, args...)
 				break
 			}
+
+			// 因为不断去掉已经处理过的 args slice，所以返回的时候，要不停的接住
 			args, err = f.parseLongArg(s, args, fn)
 		} else {
 			args, err = f.parseShortArg(s, args, fn)
@@ -1121,6 +1183,7 @@ func (f *FlagSet) parseArgs(args []string, fn parseFunc) (err error) {
 // are defined and before flags are accessed by the program.
 // The return value will be ErrHelp if -help was set but not defined.
 func (f *FlagSet) Parse(arguments []string) error {
+	/* 兼容处理 Go 的 flag 标准库 */
 	if f.addedGoFlagSets != nil {
 		for _, goFlagSet := range f.addedGoFlagSets {
 			goFlagSet.Parse(nil)
@@ -1129,30 +1192,45 @@ func (f *FlagSet) Parse(arguments []string) error {
 	f.parsed = true
 
 	if len(arguments) < 0 {
+		// 没有 flag 输入，不需要处理
 		return nil
 	}
 
-	f.args = make([]string, 0, len(arguments))
+	f.args = make([]string, 0, len(arguments)) // 确实，放进 FlagSet.parseArgs() 区初始化更好，但是没关系了
 
 	set := func(flag *Flag, value string) error {
+		// 把 f 这个 FlagSet 直接闭包进来，后续的 set() 就直接省去指定 Flag.Name 跟 FlagSet.Set()
+		// 说白了就是偷懒
 		return f.Set(flag.Name, value)
 	}
 
 	err := f.parseArgs(arguments, set)
 	if err != nil {
+		// 注意，这里没有根据 err 的种类来决定接下来的行为
+		// 而是通过在处理过程中设置的 flag，决定接下来的行为
+		// 正式因为 default FlagSet 设置了 ExitOnError，所以输入错误、-h 才会直接退出运行
 		switch f.errorHandling {
 		case ContinueOnError:
+			// 使用者自行决定要不要终止
 			return err
 		case ExitOnError:
+			// 强制终止
 			fmt.Println(err)
 			os.Exit(2)
 		case PanicOnError:
+			// 强制终止
 			panic(err)
 		}
 	}
+
+	// 没有任何错误发生，可以继续运行
 	return nil
 }
 
+// 怎么把相应的命令行输入（输入的必然是字符串），及相应的 Flag.Value 中
+// 第一个形参，就是此时需要进行处理的那一个 pflag.Flag
+// 第二个形参，则是命令行输入的 string
+// 而两个形参的匹配过程，则是 FlagSet.parseArgs() + FlagSet.parseLongArg() + FlagSet.parseShortArg() 来完成的
 type parseFunc func(flag *Flag, value string) error
 
 // ParseAll parses flag definitions from the argument list, which should not
@@ -1185,8 +1263,10 @@ func (f *FlagSet) Parsed() bool {
 
 // Parse parses the command-line flags from os.Args[1:].  Must be called
 // after all flags are defined and before flags are accessed by the program.
+// pflag 利用 os.Args[1:] 拿到相应的命令行输入
 func Parse() {
 	// Ignore errors; CommandLine is set for ExitOnError.
+	// os.Args[0] 就是可执行文件的名称，忽略
 	CommandLine.Parse(os.Args[1:])
 }
 
@@ -1209,6 +1289,7 @@ func Parsed() bool {
 }
 
 // CommandLine is the default set of command-line flags, parsed from os.Args.
+// 通常我们用的就是这个 default FlagSet
 var CommandLine = NewFlagSet(os.Args[0], ExitOnError)
 
 // NewFlagSet returns a new, empty flag set with the specified name,

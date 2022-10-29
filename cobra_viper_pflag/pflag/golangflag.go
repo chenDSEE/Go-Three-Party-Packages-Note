@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+/* 与 Go 标准库中的 flag 兼容 */
+
 // flagValueWrapper implements pflag.Value around a flag.Value.  The main
 // difference here is the addition of the Type method that returns a string
 // name of the type.  As this is generally unknown, we approximate that with

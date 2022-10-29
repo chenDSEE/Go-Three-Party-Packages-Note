@@ -37,7 +37,7 @@ func (s *int32SliceValue) Set(val string) error {
 	} else {
 		*s.value = append(*s.value, out...)
 	}
-	s.changed = true
+	s.changed = true // -p 1 -p 2 这种 case 就很有用
 	return nil
 }
 

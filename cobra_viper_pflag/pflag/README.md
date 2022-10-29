@@ -87,7 +87,7 @@ fmt.Println("flagvar has value ", flagvar)
 ```
 
 There are helper functions available to get the value stored in a Flag if you have a FlagSet but find
-it difficult to keep up with all of the pointers in your code.
+it difficult to keep up with all of the pointers in your code.（`FlagSet` 个人感觉是没有必要这么用的，因为你还要用对 type 的函数去取值，用不对的话，得在运行时才能把问题暴露出来。但是直接用变量的话，就可以让编译器帮忙检查一些错误。一般使用 pflag 提供的 `CommandLine` 就挺好的了）
 If you have a pflag.FlagSet with a flag called 'flagname' of type int you
 can use GetInt() to get the int value. But notice that 'flagname' must exist
 and it must be an int. GetString("flagname") will fail.
@@ -97,7 +97,7 @@ i, err := flagset.GetInt("flagname")
 ```
 
 After parsing, the arguments after the flag are available as the
-slice flag.Args() or individually as flag.Arg(i).
+slice flag.Args() or individually as flag.Arg(i).(注意，`flag.Args()` 是特指剩下没有被出来的命令行输入参数，也就是 `--` 后面的参数，或者是没有匹配到 flag 的参数)
 The arguments are indexed from 0 through flag.NArg()-1.
 
 The pflag package also defines some new functions that are not in flag,
@@ -143,6 +143,8 @@ Would result in something like
 | --flagname       | ip=4321         |
 | [nothing]        | ip=1234         |
 
+可以使用，但是没有必要。因为第二种跟第三种的默认值竟然是不一样的，这看起来未免让人感到是非困惑
+
 ## Command line flag syntax
 
 ```
@@ -185,6 +187,8 @@ TRUE, FALSE, True, False.
 Duration flags accept any input valid for time.ParseDuration.
 
 ## Mutating or "Normalizing" Flag names
+
+Normalizing Flag，实际上是将 flag 中的一些符号是为等同的。就比如：`flag.a`, `flag-a`, `flag_a` 它们三者在字符串上看起来是不一样的，但是通过 pflag 提供的 Normalizing 功能（也就是调用 `FlagSet.SetNormalizeFunc()`, 将相应的等同规则设置进去）
 
 It is possible to set a custom flag name 'normalization function.' It allows flag names to be mutated both when created in the code and when used on the command line to some 'normalized' form. The 'normalized' form is used for comparison. Two examples of using the custom normalization func follow.
 
