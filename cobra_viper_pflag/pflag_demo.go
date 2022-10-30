@@ -81,9 +81,9 @@ func CLIFlagSyntax_Demo() {
 
 func BoolCLIFlagSyntax_Demo() {
 	var a, b, c bool
-	pflag.BoolVarP(&a,"bool-a", "a", false, "bool type flag for a")
-	pflag.BoolVarP(&b,"bool-b", "b", false, "bool type flag for b")
-	pflag.BoolVarP(&c,"bool-c", "c", false, "bool type flag for c")
+	pflag.BoolVarP(&a, "bool-a", "a", false, "bool type flag for a")
+	pflag.BoolVarP(&b, "bool-b", "b", false, "bool type flag for b")
+	pflag.BoolVarP(&c, "bool-c", "c", false, "bool type flag for c")
 	pflag.Parse()
 
 	// test case:
@@ -115,7 +115,7 @@ func count_Demo() {
 func time_Demo() {
 	// string 转换为标准库 time.Duration
 
-	t := pflag.DurationP("time", "t", 1 * time.Second, "time in second")
+	t := pflag.DurationP("time", "t", 1*time.Second, "time in second")
 	pflag.Parse()
 
 	// test case:

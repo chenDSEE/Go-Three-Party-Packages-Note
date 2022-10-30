@@ -1,0 +1,27 @@
+default-value:
+  key-1: 50
+  key-2: 50
+key-1: value-string
+CaseInsensitive: "you get [CaseInsensitive] key value"
+nest:
+  bool-key: true
+  float64-key: 1.234
+  int-key: 10
+  int-slice-key:
+    - 20
+    - 30
+    - 40
+  string-key: "string-value"
+  string-slice-key:
+    - string-value-1
+    - string-value-2
+    - string-value-3
+#  time-key:
+  duration-key-3s: 3s
+  duration-key-0.5s: 0.5s
+  duration-key-30ms: 30ms
+  duration-key-3000ms: 3000ms
+env:
+  k1: 50
+  k2: 50
+  k3: 50
