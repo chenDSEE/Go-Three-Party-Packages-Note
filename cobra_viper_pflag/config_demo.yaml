@@ -25,3 +25,18 @@ env:
   k1: 50
   k2: 50
   k3: 50
+deep-nest:
+  k11:
+    k21:
+      k31: value
+      k32: value
+    k22:
+      k31: value
+      k32: value
+  k12:
+    k21:
+      k31: value
+      k32: value
+    k22:
+      k31: value
+      k32: value

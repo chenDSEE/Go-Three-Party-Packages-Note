@@ -884,6 +884,8 @@ You can vote for case sensitivity by filling out this feedback form: https://for
 
 No, you will need to synchronize access to the viper yourself (for example by using the `sync` package). Concurrent reads and writes can cause a panic.
 
+`Viper` 本身是并非并发安全的。`Viper` 其实更倾向于有一个良好的配置文件读取框架，而不是一个并发安全的配置**管理**框架
+
 ## Troubleshooting
 
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md).

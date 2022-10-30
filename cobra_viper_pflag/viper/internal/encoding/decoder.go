@@ -19,6 +19,9 @@ const (
 )
 
 // DecoderRegistry can choose an appropriate Decoder based on the provided format.
+// 大部分情况是没有必要用到这个 mu 锁的，
+// 通常是在 reset 的场景（重新向 Viper 加载 decoder）、从 Viper 中拿一个 decoder 才需要加锁
+// 大部分场合是用不上的
 type DecoderRegistry struct {
 	decoders map[string]Decoder
 

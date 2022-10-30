@@ -60,6 +60,9 @@ func (e ConfigMarshalError) Error() string {
 	return fmt.Sprintf("While marshaling config: %s", e.err.Error())
 }
 
+// default 的 Viper
+// 因为 Viper 的实际上，一个 Viper instance 只能够处理一个配置文件
+// 所以当 app 需要多个配置文件的话，一般建议直接自己多创建几个 Viper instance
 var v *Viper
 
 type RemoteResponse struct {
@@ -146,7 +149,7 @@ func DecodeHook(hook mapstructure.DecodeHookFunc) DecoderConfigOption {
 // maintains a set of configuration sources, fetches
 // values to populate those, and provides them according
 // to the source's priority.
-// The priority of the sources is the following:
+// The priority of the sources is the following（优先级排序）:
 // 1. overrides
 // 2. flags
 // 3. env. variables
@@ -178,12 +181,15 @@ func DecodeHook(hook mapstructure.DecodeHookFunc) DecoderConfigOption {
 //	}
 //
 // Note: Vipers are not safe for concurrent Get() and Set() operations.
+// 因为你在 package 内部，是不需要用 Viper.FuncXXX() 的，所有直接把主要 struct 跟 package 同名也没有太大问题
 type Viper struct {
 	// Delimiter that separates a list of keys
 	// used to access a nested value in one go
+	// 分隔符，可以通过 KeyDelimiter() 设置
 	keyDelim string
 
 	// A set of paths to look for the config file in
+	// 可以配置多个查找路径
 	configPaths []string
 
 	// The filesystem to read config from.
@@ -194,6 +200,7 @@ type Viper struct {
 
 	// Name of file to look for inside the path
 	configName        string
+	// Viper 可以在多个路径中查找相应的配置文件，当找到了之后，这个 configFile 就会记录这个配置文件的绝对路径 + 全名
 	configFile        string
 	configType        string
 	configPermissions os.FileMode
@@ -206,6 +213,16 @@ type Viper struct {
 	envKeyReplacer      StringReplacer
 	allowEmptyEnv       bool
 
+	// 分别存储了不同数据源的数据
+	// 根据 Get() 时不同的查找顺序，最终达到了数据源优先级分类的效果
+	// Q&A(DONE): 为什么都是 map[string]interface{} ？
+	// 为了支持 nested 类型的配置项，详细的可以参考 Viper.searchMap()，Viper.searchIndexableWithPathPrefixes()
+	// 而且底层的 decoder 库也是采用 map[string]interface{} 相互嵌套的方式来处理 nested 的
+	// 每一层 map 的 key，仅仅是一节 key。比如：
+	// k1.k2.k3
+	// m2 := m1[k1].(map[string]interface{})
+	// m3 := m2[k2].(map[string]interface{})
+	// value := m3[k3]
 	config         map[string]interface{}
 	override       map[string]interface{}
 	defaults       map[string]interface{}
@@ -217,7 +234,7 @@ type Viper struct {
 
 	onConfigChange func(fsnotify.Event)
 
-	logger Logger
+	logger Logger // 一般只用在调试阶段，WithLogger() 可以注入自己的 Logger
 
 	// TODO: should probably be protected with a mutex
 	encoderRegistry *encoding.EncoderRegistry
@@ -304,6 +321,7 @@ func Reset() {
 }
 
 // TODO: make this lazy initialization instead
+// 避免 decoder、encoder 内部 buf 导致问题，所以要进行一次 reset
 func (v *Viper) resetEncoding() {
 	encoderRegistry := encoding.NewEncoderRegistry()
 	decoderRegistry := encoding.NewDecoderRegistry()
@@ -565,7 +583,7 @@ func (v *Viper) AddConfigPath(in string) {
 		absin := absPathify(v.logger, in)
 
 		v.logger.Info("adding path to search paths", "path", absin)
-		if !stringInSlice(absin, v.configPaths) {
+		if !stringInSlice(absin, v.configPaths) { // 去重
 			v.configPaths = append(v.configPaths, absin)
 		}
 	}
@@ -648,15 +666,34 @@ func (v *Viper) providerPathExists(p *defaultRemoteProvider) bool {
 // searchMap recursively searches for a value for path in source map.
 // Returns nil if not found.
 // Note: This assumes that the path entries and map keys are lower cased.
+// path 举例：
+// key 是：net.server.ip;
+// path = []string{"net", "server", "ip"}
+//
+// Q&A(DONE): map[interface{}]interface{} 与 cast.ToStringMap()
+// 实际过程长这样：
+// 而且底层的 decoder 库也是采用 map[string]interface{} 相互嵌套的方式来处理 nested 的
+// 每一层 map 的 key，仅仅是一节 key。比如：
+// k1.k2.k3
+// m2 := m1[k1].(map[string]interface{})
+// m3 := m2[k2].(map[string]interface{})
+// value := m3[k3]
 func (v *Viper) searchMap(source map[string]interface{}, path []string) interface{} {
 	if len(path) == 0 {
+		// return 的 source 不一定可以用的，因为可能是 path 耗尽了
+		// source 都没有走到叶子节点
+		// 这时候，通常是使用者第一次调用的时候，path 就没有填好导致的
+		// 正常的递归情况，都是走下面的 if len(path) == 1 离开递归调用的
 		return source
 	}
 
+	// example: path = []string{"net", "server", "ip"}
 	next, ok := source[path[0]]
 	if ok {
 		// Fast path
 		if len(path) == 1 {
+			// get value
+			// 正常情况是在这里结束递归调用的
 			return next
 		}
 
@@ -673,6 +710,8 @@ func (v *Viper) searchMap(source map[string]interface{}, path []string) interfac
 			return nil
 		}
 	}
+
+	// map 压根没有 value，直接退出
 	return nil
 }
 
@@ -687,6 +726,10 @@ func (v *Viper) searchMap(source map[string]interface{}, path []string) interfac
 // in their keys).
 //
 // Note: This assumes that the path entries and map keys are lower cased.
+// 整个搜索过程其实是 BFS
+// 同一个 KEY 先做 BFS(map 加速了 BFS 的过程，直接变成了 O(1))
+// 然后缩短 key 继续做 BFS
+// 直到 key 为 0
 func (v *Viper) searchIndexableWithPathPrefixes(source interface{}, path []string) interface{} {
 	if len(path) == 0 {
 		return source
@@ -695,7 +738,21 @@ func (v *Viper) searchIndexableWithPathPrefixes(source interface{}, path []strin
 	// search for path prefixes, starting from the longest one
 	for i := len(path); i > 0; i-- {
 		prefixKey := strings.ToLower(strings.Join(path[0:i], v.keyDelim))
-
+		//fmt.Printf("%d:%s, path%v\n", i, prefixKey, path)
+		// key: deep-nest.k11.k21.k31
+		// 4:deep-nest.k11.k21.k31, path[deep-nest k11 k21 k31](同一个 searchIndexableWithPathPrefixes，但是找不到 deep-nest.k11.k21.k31 对应的 map)
+		// 3:deep-nest.k11.k21,     path[deep-nest k11 k21 k31](同一个 searchIndexableWithPathPrefixes，但是找不到 deep-nest.k11.k21 对应的 map)
+		// 2:deep-nest.k11,         path[deep-nest k11 k21 k31](同一个 searchIndexableWithPathPrefixes，但是找不到 deep-nest.k11 对应的 map)
+		// 1:deep-nest,             path[deep-nest k11 k21 k31](同一个 searchIndexableWithPathPrefixes，成功找到 deep-nest 对应的 map)
+		// 新的 searchIndexableWithPathPrefixes()
+		// 3:k11.k21.k31,           path[k11 k21 k31](同一个 searchIndexableWithPathPrefixes，但是找不到 k11.k21.k31 对应的 map)
+		// 2:k11.k21,               path[k11 k21 k31](同一个 searchIndexableWithPathPrefixes，但是找不到 k11.k21 对应的 map)
+		// 1:k11,                   path[k11 k21 k31](同一个 searchIndexableWithPathPrefixes，成功找到 k11 对应的 map)
+		// 新的 searchIndexableWithPathPrefixes()
+		// 2:k21.k31,               path[k21 k31](同一个 searchIndexableWithPathPrefixes，但是找不到 k21.k31 对应的 map)
+		// 1:k21,                   path[k21 k31](同一个 searchIndexableWithPathPrefixes，成功找到 k21 对应的 map)
+		// 新的 searchIndexableWithPathPrefixes()
+		// 1:k31, path[k31]         找到了 value
 		var val interface{}
 		switch sourceIndexable := source.(type) {
 		case []interface{}:
@@ -760,15 +817,33 @@ func (v *Viper) searchMapWithPathPrefixes(
 ) interface{} {
 	next, ok := sourceMap[prefixKey]
 	if !ok {
+		// prefixKey 不存在，直接退出
+		// 例如这几个 case
+		// 4:deep-nest.k11.k21.k31, path[deep-nest k11 k21 k31](同一个 searchIndexableWithPathPrefixes，但是找不到 deep-nest.k11.k21.k31 对应的 map)
+		// 3:deep-nest.k11.k21,     path[deep-nest k11 k21 k31](同一个 searchIndexableWithPathPrefixes，但是找不到 deep-nest.k11.k21 对应的 map)
+		// 2:deep-nest.k11,         path[deep-nest k11 k21 k31](同一个 searchIndexableWithPathPrefixes，但是找不到 deep-nest.k11 对应的 map)
 		return nil
 	}
+	/*
+	else {
+		next 肯定存在，但是不确定这究竟是叶子节点，还是中间节点
+	}
+	*/
+
 
 	// Fast path
 	if pathIndex == len(path) {
+		// 叶子节点，返回 value
+		// Q&A(DONE): 为什么这样能够判断是叶子节点？
+		// 1. 看下面的那个 switch-case，path 总是去掉前缀再给下一层的，
+		//    当 pathIndex == len(path)，其实也就没有所谓的下一层了
+		// 2. 再者，同一层的进来 searchMapWithPathPrefixes() 进行判断，path 总是相同的长度
 		return next
 	}
 
 	// Nested case
+	// next 是中间节点，继续下一层
+	// 去掉前缀，再给下一层
 	switch n := next.(type) {
 	case map[interface{}]interface{}:
 		return v.searchIndexableWithPathPrefixes(cast.ToStringMap(n), path[pathIndex:])
@@ -1221,6 +1296,7 @@ func (v *Viper) MustBindEnv(input ...string) {
 //
 // Viper will check to see if an alias exists first.
 // Viper will then check in the following order:
+// 通过这个函数来控制检查的优先顺序，从而达到了配置项优先级相互覆盖的效果
 // flag, env, config file, key/value store.
 // Lastly, if no value was found and flagDefault is true, and if the key
 // corresponds to a flag, the flag's default value is returned.
@@ -1230,8 +1306,8 @@ func (v *Viper) find(lcaseKey string, flagDefault bool) interface{} {
 	var (
 		val    interface{}
 		exists bool
-		path   = strings.Split(lcaseKey, v.keyDelim)
-		nested = len(path) > 1
+		path   = strings.Split(lcaseKey, v.keyDelim) // 在这个配置文件中，key-value 的 path
+		nested = len(path) > 1 // 是否 nested ？
 	)
 
 	// compute the path through the nested maps to the nested value
@@ -1533,6 +1609,7 @@ func (v *Viper) ReadInConfig() error {
 		return err
 	}
 
+	// 是不是支持这种类型的配置文件
 	if !stringInSlice(v.getConfigType(), SupportedExts) {
 		return UnsupportedConfigError(v.getConfigType())
 	}
@@ -1545,6 +1622,7 @@ func (v *Viper) ReadInConfig() error {
 
 	config := make(map[string]interface{})
 
+	// 开始解析配置文件内容
 	err = v.unmarshalReader(bytes.NewReader(file), config)
 	if err != nil {
 		return err
@@ -1693,18 +1771,19 @@ func unmarshalReader(in io.Reader, c map[string]interface{}) error {
 }
 
 func (v *Viper) unmarshalReader(in io.Reader, c map[string]interface{}) error {
-	buf := new(bytes.Buffer)
+	buf := new(bytes.Buffer) // 可能是网络 IO，也可能是 bytes.Reader，所以先套上一层 buf 再说
 	buf.ReadFrom(in)
 
 	switch format := strings.ToLower(v.getConfigType()); format {
 	case "yaml", "yml", "json", "toml", "hcl", "tfvars", "ini", "properties", "props", "prop", "dotenv", "env":
+		// 通过工厂的方式区 decode 相应的键值对
 		err := v.decoderRegistry.Decode(format, buf.Bytes(), c)
 		if err != nil {
 			return ConfigParseError{err}
 		}
 	}
 
-	insensitiviseMap(c)
+	insensitiviseMap(c) // 大小写无关处理
 	return nil
 }
 
@@ -2108,6 +2187,7 @@ func (v *Viper) getConfigType() string {
 		return v.configType
 	}
 
+	// 没有设置 v.configType 的话，只能尝试冲文件本身读取 type 信息
 	cf, err := v.getConfigFile()
 	if err != nil {
 		return ""
@@ -2124,6 +2204,7 @@ func (v *Viper) getConfigType() string {
 
 func (v *Viper) getConfigFile() (string, error) {
 	if v.configFile == "" {
+		// 配置文件的读取只会有一次
 		cf, err := v.findConfigFile()
 		if err != nil {
 			return "", err

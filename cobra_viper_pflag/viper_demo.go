@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/spf13/viper"
 	"os"
 	"strings"
+
+	"github.com/spf13/viper"
 )
 
 const (
@@ -54,6 +55,14 @@ func main() {
 
 	fmt.Println("================= ENV_Demo() ==================")
 	ENV_Demo()
+	fmt.Println("===============================================")
+
+	fmt.Println("=============== deepNest_Demo() ===============")
+	deepNest_Demo()
+	fmt.Println("===============================================")
+
+	fmt.Println("=============== mapping_demo() ================")
+	mapping_demo()
 	fmt.Println("===============================================")
 
 	fmt.Println("========> demo end")
@@ -137,14 +146,6 @@ func accessNestedKey_Demo() {
 	key = "nest.duration-key-3000ms"; fmt.Printf("%s:[%v]\n", key, viper.GetDuration(key))
 }
 
-func mapping_demo() {
-
-}
-
-func cache_demo() {
-
-}
-
 func loadSecondCfg_Demo() {
 	newCfgName := cfgName + "_2"
 	cfgParser := viper.New()
@@ -171,6 +172,7 @@ func loadSecondCfg_Demo() {
 }
 
 func ENV_Demo() {
+	// env already bind before configuration loaded
 	var key string
 	key = "env.k1"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
 	key = "env.k2"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
@@ -180,8 +182,42 @@ func ENV_Demo() {
 	_ = os.Setenv("PREFIX_ENV_K1", "20")
 	_ = os.Setenv("PREFIX_ENV_K2", "20")
 	//_ = os.Setenv("PREFIX_ENV_K3", "20")
+
+	// ENV variable will not cache in viper, but always access data from system
 	key = "env.k1"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
 	key = "env.k2"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
 	key = "env.k3"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
 }
 
+func deepNest_Demo() {
+	key := "deep-nest.k11.k21.k31"
+	fmt.Printf("%s:[%v]\n", key, viper.GetString(key))
+}
+
+type mapStruct struct {
+	intKey    int    `mapstructure:"k1"`
+	stringKey string `mapstructure:"k2"`
+}
+
+func mapping_demo() {
+	mapping := mapStruct{}
+	err := viper.Unmarshal(&mapping)
+	if err != nil {
+		fmt.Printf("error when viper.Unmarshal() %s\n", err.Error())
+		return
+	}
+
+	fmt.Printf("mapStruct:\n%+v\n", mapping)
+}
+
+func cache_demo() {
+
+}
+
+func withPflag_Demo() {
+
+}
+
+func sub_Demo() {
+
+}
