@@ -154,21 +154,21 @@ type FlagSet struct {
 
 	name              string
 	parsed            bool // FlagSet.Parse() 调用的标识。基本没用，对应 FlagSet.Parsed()
-	sortedActual      []*Flag
-
+	
 	// Q&A(DONE): actual 跟 formal 有什么区别？
 	// actual 是实际命令中输入了那些命令
 	// formal 是代码编写者写了哪些命令
 	actual            map[NormalizedName]*Flag
 	formal            map[NormalizedName]*Flag // 一般化的 flag-name 作为 key，Flag struct 作为 value
-
+	shorthands        map[byte]*Flag // shorthand 简写 mapping to Flag struct
+	
 	// 这些 ordered 是为了在不同场景下，采用不同的顺序进行遍历
 	orderedActual     []*Flag
 	orderedFormal     []*Flag // 按照 Flag 的注册顺序排列
+	sortedActual      []*Flag
 	sortedFormal      []*Flag
 
-	shorthands        map[byte]*Flag // shorthand 简写 mapping to Flag struct
-	args              []string // arguments after flags（包含全部）
+	args              []string // arguments after flags（pflag 剩下没有处理的 flag）
 	argsLenAtDash     int      // len(args) when a '--' was located when parsing, or -1 if no --
 	errorHandling     ErrorHandling
 	output            io.Writer // nil means stderr; use out() accessor
@@ -866,6 +866,7 @@ func (f *FlagSet) VarP(value Value, name, shorthand, usage string) {
 	f.VarPF(value, name, shorthand, usage)
 }
 
+// 将 Flag 放入 FlagSet 中的 hash map
 // AddFlag will add the flag to the FlagSet
 func (f *FlagSet) AddFlag(flag *Flag) {
 	/* long-name 的处理 */
@@ -992,7 +993,7 @@ func (f *FlagSet) parseLongArg(s string, args []string, fn parseFunc) (a []strin
 
 	split := strings.SplitN(name, "=", 2) // 可能有 "=", 也可能没有，但是都是拿 split[0]
 	name = split[0]
-	flag, exists := f.formal[f.normalizeFlagName(name)]
+	flag, exists := f.formal[f.normalizeFlagName(name)]  // 找到相应的 Flag，后续才能将解析出来了的值，放到相应的内存上
 
 	if !exists {
 		switch {
@@ -1050,7 +1051,7 @@ func (f *FlagSet) parseSingleShortArg(shorthands string, args []string, fn parse
 	outShorts = shorthands[1:] // 去掉 '-'
 	c := shorthands[0]
 
-	flag, exists := f.shorthands[c]
+	flag, exists := f.shorthands[c] // 找到相应的 Flag，后续才能将解析出来了的值，放到相应的内存上
 	if !exists {
 		switch {
 		case c == 'h':
@@ -1195,7 +1196,8 @@ func (f *FlagSet) Parse(arguments []string) error {
 		// 没有 flag 输入，不需要处理
 		return nil
 	}
-
+	
+	// 存放 pflag 没有处理的 CLI 输入
 	f.args = make([]string, 0, len(arguments)) // 确实，放进 FlagSet.parseArgs() 区初始化更好，但是没关系了
 
 	set := func(flag *Flag, value string) error {

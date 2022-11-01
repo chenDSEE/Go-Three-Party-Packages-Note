@@ -40,3 +40,12 @@ deep-nest:
     k22:
       k31: value
       k32: value
+mapping:
+  int-key: 10
+  string-key: string-value
+  int-slice:
+    - 10
+    - 20
+    - 30
+  sub:
+    int-key: 40

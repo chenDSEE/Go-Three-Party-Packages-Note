@@ -194,30 +194,26 @@ func deepNest_Demo() {
 	fmt.Printf("%s:[%v]\n", key, viper.GetString(key))
 }
 
+// NOTE: 用来 mapping 的结构体字段，一定要首字母大写
+// 不 public 出去，mapstructure 是没有办法访问的！
 type mapStruct struct {
-	intKey    int    `mapstructure:"k1"`
-	stringKey string `mapstructure:"k2"`
+	IntKey    int    `mapstructure:"int-key"`
+	StringKey string `mapstructure:"string-key"`
+	IntSlice  []int  `mapstructure:"int-slice"`
+	Sub       sub    `mapstructure:"sub"`
+}
+
+type sub struct {
+	IntKey int `mapstructure:"int-key"`
 }
 
 func mapping_demo() {
 	mapping := mapStruct{}
-	err := viper.Unmarshal(&mapping)
+	err := viper.UnmarshalKey("mapping", &mapping)
 	if err != nil {
 		fmt.Printf("error when viper.Unmarshal() %s\n", err.Error())
 		return
 	}
 
 	fmt.Printf("mapStruct:\n%+v\n", mapping)
-}
-
-func cache_demo() {
-
-}
-
-func withPflag_Demo() {
-
-}
-
-func sub_Demo() {
-
 }
