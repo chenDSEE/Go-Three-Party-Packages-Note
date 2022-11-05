@@ -78,6 +78,7 @@ func AddTemplateFuncs(tmplFuncs template.FuncMap) {
 	}
 }
 
+// 其实跟 cobra.Command.PersistentPreRun 差不多，但是这个并不能传递参数，只能用闭包
 // OnInitialize sets the passed functions to be run when each command's
 // Execute method is called.
 func OnInitialize(y ...func()) {

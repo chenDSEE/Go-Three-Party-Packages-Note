@@ -1,0 +1,11 @@
+app:
+  name: app-demo
+  mode: debug
+network:
+  ip: 1.1.1.1
+  port: 1111
+  proto: tcp
+log:
+  name: log-name.log
+  path: ./
+  level: debug

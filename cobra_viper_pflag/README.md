@@ -1581,91 +1581,173 @@ func decode(input interface{}, config *mapstructure.DecoderConfig) error {
 
 
 # cobra(v1.5.0)
+- **command 控制的是：使用不同的入口函数；flag 跟 configuration-file 控制的是：不同变量的取值**
+  - cobra 负责解析命令，cobra 将 flag 交由 pflag 处理，cobra 处理完 flag 之前，调用 viper 加载配置文件；配置文件的解析由 viper 负责完成
+- 不同的 `cobra.Command` 其实也就意味着不同的开始函数。但是 command 并不改变任何变量的值
+- `pflag.Flag` 跟 `Viper.Viper` 则会改变变量的值
+- cobra 实际上是 viper 跟 pflag 的融合框架，但是目前 viper 跟 pflag 并不能很好的配合（viper 的部分 API 并不会 merge pflag 跟配置文件），这个问题需要等待 viper v2 才能比较好的解决
+  - 所以利用 cobra 来构建 CLI 启动的 app，现在是需要自己完成 flag 跟配置文件之间的 merge 的
 
 ## How to run demo
 
-```bash
-[root@LC cobra]# go build -o demo main.go 
-[root@LC cobra]# ./demo -h
-demo just a try for cobra, just for learning.
+```yaml
+app:
+  name: app-demo
+  mode: debug
+network:
+  ip: 1.1.1.1
+  port: 1111
+  proto: tcp
+log:
+  name: log-name.log
+  path: ./
+  level: debug
 
-Usage:
-  demo [flags]
-  demo [command]
-
-Available Commands:
-  completion  Generate the autocompletion script for the specified shell
-  help        Help about any command
-  status      Print the status number of demo
-  version     Print the version number of demo
-
-Flags:
-  -h, --help      help for demo
-  -v, --verbose   verbose output
-
-Use "demo [command] --help" for more information about a command.
-main function Verbose[false], versionFmt[default-format]
-[root@LC cobra]# ./demo -v version
-demo version
-main function Verbose[true], versionFmt[default-format]
-[root@LC cobra]# ./demo status -h
-All software has status. This is demo's
-
-Usage:
-  demo status [flags]
-
-Flags:
-  -h, --help   help for status
-
-Global Flags:
-  -v, --verbose   verbose output
-main function Verbose[false], versionFmt[default-format]
-[root@LC cobra]# ./demo version
-demo version
-main function Verbose[false], versionFmt[default-format]
-[root@LC cobra]# ./demo status -h
-All software has status. This is demo's
-
-Usage:
-  demo status [flags]
-
-Flags:
-  -h, --help   help for status
-
-Global Flags:
-  -v, --verbose   verbose output
-main function Verbose[false], versionFmt[default-format]
-[root@LC cobra]# ./demo version -h
-All software has versions. This is demo's
-
-Usage:
-  demo version [flags]
-
-Flags:
-  -f, --format string   format version information (default "default-format")
-  -h, --help            help for version
-
-Global Flags:
-  -v, --verbose   verbose output
-main function Verbose[false], versionFmt[default-format]
-[root@LC cobra]# ./demo version -f "demo-string"
-demo version
-main function Verbose[false], versionFmt[demo-string]
-[root@LC cobra]# 
 ```
 
-## test demo
-```bash
-go build -o demo main.go 
-./demo -h
-./demo -v
-./demo status
-./demo version
-./demo version -h
-./demo version -f "demo-fmt"
-./demo status -h
-./demo stat
+```go
+// https://carolynvanslyck.com/blog/2020/08/sting-of-the-viper/
+// https://github.com/spf13/viper/discussions/1061
+package main
+
+import (
+	"fmt"
+	"net"
+	"os"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+)
+
+// 优先级：
+// 1. flag
+// 2. configuration
+// 3. default value in flag
+
+// test case:
+// 1. go build -o app all_demo.go && ./app
+// 2. go build -o app all_demo.go && ./app server
+// 3. go build -o app all_demo.go && ./app server -i 192.168.0.1
+// 4. go build -o app all_demo.go && ./app server -i 192.168.0.1 -p 1234 -c ./another_config.yaml
+// 5. go build -o app all_demo.go && ./app server -c ./another_config.yaml        #(display flag default ip)
+func main() {
+	Execute()
+	fmt.Printf("ipFlag[%s], portFlag[%d], configFileFlag[%s]\n", ipFlag.String(), portFlag, configFileFlag)
+}
+
+// cobra and flag ==============================================================
+func Execute() {
+	if err := rootCmd.Execute(); err != nil {
+		// The error can then be caught at the execute function call
+		fmt.Println("Execute error")
+		os.Exit(1)
+	}
+}
+
+var (
+	configFileFlag string
+	ipFlag         net.IP
+	portFlag       int
+)
+
+const (
+	defaultIP   = "127.0.0.1"
+	defaultPort = 80
+)
+
+// update flag from viper
+var flagUpdater = make([]func(), 0)
+
+func init() {
+	// OnInitialize sets the passed functions to be run when each command's Execute method is called.
+	cobra.OnInitialize(loadConfig)
+
+	// root command
+	rootCmd.PersistentFlags().StringVarP(
+		&configFileFlag, "config", "c",
+		defaultCfgPath+defaultCfgFullName,
+		"specifing path to configuration file")
+
+	rootCmd.AddCommand(serverCmd)
+
+	// sub command
+	serverCmd.PersistentFlags().IPVarP(
+		&ipFlag, "ip", "i", net.ParseIP(defaultIP),
+		"server ip to listen on")
+
+	serverCmd.PersistentFlags().IntVarP(
+		&portFlag, "port", "p", defaultPort,
+		"server port to listen on")
+
+	// bind flag to configuration
+	viper.BindPFlag("network.ip", serverCmd.PersistentFlags().Lookup("ip"))
+	flagUpdater = append(flagUpdater, func() {
+		ipFlag = net.ParseIP(viper.GetString("network.ip"))
+	})
+
+	viper.BindPFlag("network.port", serverCmd.PersistentFlags().Lookup("port"))
+	flagUpdater = append(flagUpdater, func() {
+		portFlag = viper.GetInt("network.port")
+	})
+}
+
+// Command.Run, Command.RunE 都不设置的话，就会自动打印 help 信息
+var rootCmd = &cobra.Command{
+	Use:   "app",
+	Short: "short description for app",
+	Long:  `long description for app`,
+}
+
+var serverCmd = &cobra.Command{
+	Use:   "server",
+	Short: "run app as a server",
+	Long:  `run app as a server to provide service`,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("running [%s] command with arg:%v\n", cmd.CommandPath(), args)
+	},
+}
+
+// configuration file ==========================================================
+const (
+	defaultCfgName     = "all_config"
+	defaultCfgType     = "yaml"
+	defaultCfgFullName = defaultCfgName + "." + defaultCfgType
+	defaultCfgPath     = "./"
+)
+
+func loadConfig() {
+	var file string
+	if configFileFlag != "" {
+		// specified configuration file by CLI flag
+		viper.SetConfigFile(configFileFlag)
+		file = configFileFlag
+	} else {
+		viper.SetConfigName(defaultCfgName) // name of config file (without extension)
+		viper.SetConfigType(defaultCfgType) // REQUIRED if the config file does not have the extension in the name
+		viper.AddConfigPath(defaultCfgPath) // path to look for the config file in
+		file = defaultCfgFullName
+	}
+
+	if err := viper.ReadInConfig(); err != nil {
+		var info string
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// Config file not found; ignore error if desired
+			info = fmt.Sprintf("can not find [%s]", file)
+		} else {
+			// Config file was found but another error was produced
+			info = fmt.Sprintf("find [%s], but something error when parsing", file)
+		}
+
+		panic(info)
+	}
+
+	for _, updater := range flagUpdater {
+		updater()
+	}
+}
 ```
+
+
 
 
 ## Why *cobra* package
@@ -1675,4 +1757,488 @@ go build -o demo main.go
 
 
 
-## Command struct
+## 流程梳理
+
+### 注册 command、flag、配置文件
+
+#### `Command` tree 构建
+- 在 cobra 的设计上，一个 `Command` 其实就意味着一个程序入口，所以 `Command` 都需要指定一个函数入口的
+- 其实 Command tree 的构建很简单，就是将不同的 `Command` 按照层级关系 add 进去就好了
+```go
+func init() {
+	// OnInitialize sets the passed functions to be run when each command's Execute method is called.
+	cobra.OnInitialize(loadConfig)
+
+	.......
+
+	// root command
+	rootCmd.AddCommand(serverCmd)
+
+	// sub command
+	......
+}
+
+// Command.Run, Command.RunE 都不设置的话，就会自动打印 help 信息
+var rootCmd = &cobra.Command{
+	Use:   "app",
+	Short: "short description for app",
+	Long:  `long description for app`,
+}
+
+var serverCmd = &cobra.Command{
+	Use:   "server",
+	Short: "run app as a server",
+	Long:  `run app as a server to provide service`,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("running [%s] command with arg:%v\n", cmd.CommandPath(), args)
+	},
+}
+```
+
+```go
+// Command is just that, a command for your application.
+// E.g.  'go run ...' - 'run' is the command. Cobra requires
+// you to define the usage and description as part of your command
+// definition to ensure usability.
+type Command struct {
+	// Use is the one-line usage message.
+	// Recommended syntax is as follow:
+	//   [ ] identifies an optional argument. Arguments that are not enclosed in brackets are required.
+	//   ... indicates that you can specify multiple values for the previous argument.
+	//   |   indicates mutually exclusive information. You can use the argument to the left of the separator or the
+	//       argument to the right of the separator. You cannot use both arguments in a single use of the command.
+	//   { } delimits a set of mutually exclusive arguments when one of the arguments is required. If the arguments are
+	//       optional, they are enclosed in brackets ([ ]).
+	// Example: add [-F file | -D dir]... [-f format] profile
+	Use string
+
+	.........
+
+	// Short is the short description shown in the 'help' output.
+	Short string
+
+	// Long is the long message shown in the 'help <this-command>' output.
+	Long string
+
+	.......
+
+	// Command 解析完之后，运行前可以使用的 hook
+	// Q&A(DONE): 下面的 hook 带 E 后缀，跟不带有什么区别？
+	// 这个 hook 能不能向外传递 error
+	//
+	// 下面这些函数在执行之前，已经处理完 flag 了
+	// The *Run functions are executed in the following order:
+	//   * PersistentPreRun() 在这里我们可以挂载 viper 加载的代码
+	//   * PreRun()
+	//   * Run()
+	//   * PostRun()
+	//   * PersistentPostRun()
+	// All functions get the same args, the arguments after the command name.
+	//
+	PersistentPreRun func(cmd *Command, args []string)
+	PersistentPreRunE func(cmd *Command, args []string) error
+	PreRun func(cmd *Command, args []string)
+	PreRunE func(cmd *Command, args []string) error
+	Run func(cmd *Command, args []string)
+	RunE func(cmd *Command, args []string) error
+	PostRun func(cmd *Command, args []string)
+	PostRunE func(cmd *Command, args []string) error
+	PersistentPostRun func(cmd *Command, args []string)
+	PersistentPostRunE func(cmd *Command, args []string) error
+
+	// args is actual args parsed from flags. default is os.Args[1:]
+	args []string
+	// flagErrorBuf contains all error messages from pflag.
+	flagErrorBuf *bytes.Buffer
+
+	// NOTE:
+	// cobra 直接利用 pflag package 的 FlagSet API
+	// 这也导致了不同 FlagSet 的直接的割裂，没办法所有 FlagSet 保持逻辑上的一致。
+	// 但是，也不会有很严重的问题。因为 Command.Execute() 会调用：
+	// Command.ParseFlags() 通过 Command.mergePersistentFlags() 进行了修复
+	//
+	// flags is full set of flags.
+	flags *flag.FlagSet
+	// pflags contains persistent flags.（从自己这里开始一直向下传的）
+	pflags *flag.FlagSet
+	// lflags contains local flags. lflags = pflags + flags, see in Command.LocalFlags()
+	lflags *flag.FlagSet
+	// iflags contains inherited flags.（上游传下来的）
+	iflags *flag.FlagSet
+	// parentsPflags is all persistent flags of cmd's parents.
+	parentsPflags *flag.FlagSet
+	// globNormFunc is the global normalization function
+	// that we can use on every pflag set and children commands
+
+	........
+
+	ctx context.Context // 更多的是为了让使用者拥有通过 cobra.Command.ctx 在不同 package 之间传递信息的能力, 而不是 cobra 内部使用
+
+	// commands is the list of commands supported by this program.
+	// 当前 Command 的所有 sub-Command 都会在这里
+	commands []*Command
+	// parent is a parent command for this command.
+	parent *Command
+
+	.......
+}
+
+```
+
+#### 向 `Command` attach flag
+
+
+```go
+var (
+	configFileFlag string
+	ipFlag         net.IP
+	portFlag       int
+)
+
+const (
+	defaultIP   = "127.0.0.1"
+	defaultPort = 80
+)
+
+func init() {
+	// OnInitialize sets the passed functions to be run when each command's Execute method is called.
+	cobra.OnInitialize(loadConfig)
+
+	// root command
+	rootCmd.PersistentFlags().StringVarP(
+		&configFileFlag, "config", "c",
+		defaultCfgPath+defaultCfgFullName,
+		"specifing path to configuration file")
+
+	rootCmd.AddCommand(serverCmd)
+
+	// sub command
+	serverCmd.PersistentFlags().IPVarP(
+		&ipFlag, "ip", "i", net.ParseIP(defaultIP),
+		"server ip to listen on")
+
+	serverCmd.PersistentFlags().IntVarP(
+		&portFlag, "port", "p", defaultPort,
+		"server port to listen on")
+
+	......
+}
+```
+
+实际上这整个过程就是利用了 pflag package 的 `pflag.FlagSet` 来实现的
+
+```go
+// Flags returns the complete FlagSet that applies
+// to this command (local and persistent declared here and by all parents).
+func (c *Command) Flags() *flag.FlagSet {
+	if c.flags == nil {
+		c.flags = flag.NewFlagSet(c.Name(), flag.ContinueOnError)
+		if c.flagErrorBuf == nil {
+			c.flagErrorBuf = new(bytes.Buffer)
+		}
+		c.flags.SetOutput(c.flagErrorBuf)
+	}
+
+	return c.flags
+}
+
+
+// PersistentFlags returns the persistent FlagSet specifically set in the current command.
+// 新建一个 FlagSet，剩下的事情，就是 pflag 增加一个 Flag 了
+func (c *Command) PersistentFlags() *flag.FlagSet {
+	if c.pflags == nil {
+		// lazy 的方式进行初始化
+		c.pflags = flag.NewFlagSet(c.Name(), flag.ContinueOnError)
+		if c.flagErrorBuf == nil {
+			c.flagErrorBuf = new(bytes.Buffer)
+		}
+		c.pflags.SetOutput(c.flagErrorBuf)
+	}
+	return c.pflags
+}
+
+// LocalFlags returns the local FlagSet specifically set in the current command.
+func (c *Command) LocalFlags() *flag.FlagSet {
+	c.mergePersistentFlags()
+
+	if c.lflags == nil {
+		c.lflags = flag.NewFlagSet(c.Name(), flag.ContinueOnError)
+		if c.flagErrorBuf == nil {
+			c.flagErrorBuf = new(bytes.Buffer)
+		}
+		c.lflags.SetOutput(c.flagErrorBuf)
+	}
+	c.lflags.SortFlags = c.Flags().SortFlags
+	if c.globNormFunc != nil {
+		c.lflags.SetNormalizeFunc(c.globNormFunc)
+	}
+
+	// addToLocal 只能每次都执行了，不然有些 Command.flags 不会同步到 Command.lflags 的
+	addToLocal := func(f *flag.Flag) {
+		if c.lflags.Lookup(f.Name) == nil && c.parentsPflags.Lookup(f.Name) == nil {
+			c.lflags.AddFlag(f)
+		}
+	}
+	c.Flags().VisitAll(addToLocal)
+	c.PersistentFlags().VisitAll(addToLocal)
+	return c.lflags
+}
+```
+
+#### cobra 控制 viper 加载时机
+
+- 通常命令行是可以指定使用哪一个配置文件的，这也就意味着：在命令行解析后、`Command` 运行前加载配置文件是比较适合的。通常我们会利用 `cobra.OnInitialize()` 或者是 `rootCmd.PersistentPreRunE` 来加载配置文件
+- 为了利用 viper 本身跟 pflag 的集成能力。但是话说，挺多 bug 的，建议自己进行 merge。这里简单利用了 `flagUpdater` 在实际运行前进行 merge
+
+```go
+var (
+	configFileFlag string
+	ipFlag         net.IP
+	portFlag       int
+)
+
+const (
+	defaultIP   = "127.0.0.1"
+	defaultPort = 80
+)
+
+// update flag from viper
+var flagUpdater = make([]func(), 0)
+
+func init() {
+	// OnInitialize sets the passed functions to be run when each command's Execute method is called.
+	cobra.OnInitialize(loadConfig)
+
+	// root command
+	rootCmd.PersistentFlags().StringVarP(
+		&configFileFlag, "config", "c",
+		defaultCfgPath+defaultCfgFullName,
+		"specifing path to configuration file")
+
+	rootCmd.AddCommand(serverCmd)
+
+	// sub command
+	serverCmd.PersistentFlags().IPVarP(
+		&ipFlag, "ip", "i", net.ParseIP(defaultIP),
+		"server ip to listen on")
+
+	serverCmd.PersistentFlags().IntVarP(
+		&portFlag, "port", "p", defaultPort,
+		"server port to listen on")
+
+	// bind flag to configuration
+	viper.BindPFlag("network.ip", serverCmd.PersistentFlags().Lookup("ip"))
+	flagUpdater = append(flagUpdater, func() {
+		ipFlag = net.ParseIP(viper.GetString("network.ip"))
+	})
+
+	viper.BindPFlag("network.port", serverCmd.PersistentFlags().Lookup("port"))
+	flagUpdater = append(flagUpdater, func() {
+		portFlag = viper.GetInt("network.port")
+	})
+}
+
+// configuration file ==========================================================
+const (
+	defaultCfgName     = "all_config"
+	defaultCfgType     = "yaml"
+	defaultCfgFullName = defaultCfgName + "." + defaultCfgType
+	defaultCfgPath     = "./"
+)
+
+func loadConfig() {
+	var file string
+	if configFileFlag != "" {
+		// specified configuration file by CLI flag
+		viper.SetConfigFile(configFileFlag)
+		file = configFileFlag
+	} else {
+		viper.SetConfigName(defaultCfgName) // name of config file (without extension)
+		viper.SetConfigType(defaultCfgType) // REQUIRED if the config file does not have the extension in the name
+		viper.AddConfigPath(defaultCfgPath) // path to look for the config file in
+		file = defaultCfgFullName
+	}
+
+	if err := viper.ReadInConfig(); err != nil {
+		var info string
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// Config file not found; ignore error if desired
+			info = fmt.Sprintf("can not find [%s]", file)
+		} else {
+			// Config file was found but another error was produced
+			info = fmt.Sprintf("find [%s], but something error when parsing", file)
+		}
+
+		panic(info)
+	}
+
+	for _, updater := range flagUpdater {
+		updater()
+	}
+}
+```
+
+### cobra 开始运行
+
+处理顺序：
+1. 从 root command 开始执行
+2. 解析 flag
+3. 运行 hook
+4. 通过 hook 让 viper 加载配置文件
+5. 执行使用者注册进来的 `XxxxxRun()` 函数
+
+```go
+/* ===== step 1 =====*/
+func main() {
+	Execute()
+	fmt.Printf("ipFlag[%s], portFlag[%d], configFileFlag[%s]\n", ipFlag.String(), portFlag, configFileFlag)
+}
+
+// cobra and flag ==============================================================
+func Execute() {
+	if err := rootCmd.Execute(); err != nil {
+		// The error can then be caught at the execute function call
+		fmt.Println("Execute error")
+		os.Exit(1)
+	}
+}
+
+// Execute uses the args (os.Args[1:] by default)
+// and run through the command tree finding appropriate matches
+// for commands and then corresponding flags.
+func (c *Command) Execute() error {
+	_, err := c.ExecuteC()
+	return err
+}
+
+// ExecuteC executes the command.
+func (c *Command) ExecuteC() (cmd *Command, err error) {
+
+	.......
+
+	// 自动构建 help 等命令
+	// initialize help at the last point to allow for user overriding
+	c.InitDefaultHelpCmd()
+	// initialize completion at the last point to allow for user overriding
+	c.initDefaultCompletionCmd()
+
+	args := c.args
+
+	// Workaround FAIL with "go test -v" or "cobra.test -test.v", see #155
+	if c.args == nil && filepath.Base(os.Args[0]) != "cobra.test" {
+		args = os.Args[1:] // 默认情况下加载 os.Args[1:]
+	}
+
+	......
+
+	// We have to pass global context to children command
+	// if context is present on the parent command.
+	if cmd.ctx == nil {
+		cmd.ctx = c.ctx
+	}
+
+	err = cmd.execute(flags) // 就开始正式执行
+
+	......
+
+	return cmd, err
+}
+```
+
+
+```go
+/* ===== step 2 =====*/
+// 解析 Flag，运行 hook
+func (c *Command) execute(a []string) (err error) {
+
+	// 自动构建 help 等命令
+	// initialize help and version flag at the last point possible to allow for user
+	// overriding
+	c.InitDefaultHelpFlag()
+	c.InitDefaultVersionFlag()
+
+	/* ===== step 2 =====*/
+	err = c.ParseFlags(a) // 解析 Flag
+
+	......
+
+	if !c.Runnable() {
+		// 不想被运行的 Command，可以用这种方式，来打印 help 信息
+		return flag.ErrHelp
+	}
+
+	/* ===== step 3 =====*/
+	c.preRun() // 跑 hook
+
+	argWoFlags := c.Flags().Args()
+	if c.DisableFlagParsing {
+		argWoFlags = a
+	}
+
+	if err := c.ValidateArgs(argWoFlags); err != nil {
+		return err
+	}
+
+	/* ===== step 4 =====*/
+	// 在这时候，其实加载了 viper
+	// PersistentPreRunE() hook, 而且因为是 Persistent 所以要检查所有的 parent Command
+	for p := c; p != nil; p = p.Parent() {
+		if p.PersistentPreRunE != nil {
+			if err := p.PersistentPreRunE(c, argWoFlags); err != nil {
+				return err
+			}
+			break
+		} else if p.PersistentPreRun != nil {
+			p.PersistentPreRun(c, argWoFlags)
+			break
+		}
+	}
+	if c.PreRunE != nil {
+		if err := c.PreRunE(c, argWoFlags); err != nil {
+			return err
+		}
+	} else if c.PreRun != nil {
+		c.PreRun(c, argWoFlags)
+	}
+
+	if err := c.validateRequiredFlags(); err != nil {
+		return err
+	}
+	if err := c.validateFlagGroups(); err != nil {
+		return err
+	}
+
+	/* ===== step 5 =====*/
+	// 这里其实就开始运行一个 app 的 main 函数了
+	// 而且很显然，不同的 Command、sub-Command 是可以设置不同的入口函数的
+	if c.RunE != nil {
+		if err := c.RunE(c, argWoFlags); err != nil {
+			return err
+		}
+	} else {
+		c.Run(c, argWoFlags)
+	}
+	if c.PostRunE != nil {
+		if err := c.PostRunE(c, argWoFlags); err != nil {
+			return err
+		}
+	} else if c.PostRun != nil {
+		c.PostRun(c, argWoFlags)
+	}
+	for p := c; p != nil; p = p.Parent() {
+		if p.PersistentPostRunE != nil {
+			if err := p.PersistentPostRunE(c, argWoFlags); err != nil {
+				return err
+			}
+			break
+		} else if p.PersistentPostRun != nil {
+			p.PersistentPostRun(c, argWoFlags)
+			break
+		}
+	}
+
+	return nil
+}
+
+
+```

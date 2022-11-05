@@ -96,8 +96,12 @@ type Command struct {
 	// command does not define one.
 	Version string
 
+	// Q&A(DONE): 下面的 hook 带 E 后缀，跟不带有什么区别？
+	// 这个 hook 能不能向外传递 error
+	//
+	// 下面这些函数在执行之前，已经处理完 flag 了
 	// The *Run functions are executed in the following order:
-	//   * PersistentPreRun()
+	//   * PersistentPreRun() 在这里我们可以挂载 viper 加载的代码
 	//   * PreRun()
 	//   * Run()
 	//   * PostRun()
@@ -125,17 +129,24 @@ type Command struct {
 	// PersistentPostRunE: PersistentPostRun but returns an error.
 	PersistentPostRunE func(cmd *Command, args []string) error
 
-	// args is actual args parsed from flags.
+	// args is actual args parsed from flags. default is os.Args[1:]
 	args []string
 	// flagErrorBuf contains all error messages from pflag.
 	flagErrorBuf *bytes.Buffer
+
+	// NOTE:
+	// cobra 直接利用 pflag package 的 FlagSet API
+	// 这也导致了不同 FlagSet 的直接的割裂，没办法所有 FlagSet 保持逻辑上的一致。
+	// 但是，也不会有很严重的问题。因为 Command.Execute() 会调用：
+	// Command.ParseFlags() 通过 Command.mergePersistentFlags() 进行了修复
+	//
 	// flags is full set of flags.
 	flags *flag.FlagSet
-	// pflags contains persistent flags.
+	// pflags contains persistent flags.（从自己这里开始一直向下传的）
 	pflags *flag.FlagSet
-	// lflags contains local flags.
+	// lflags contains local flags. lflags = pflags + flags, see in Command.LocalFlags()
 	lflags *flag.FlagSet
-	// iflags contains inherited flags.
+	// iflags contains inherited flags.（上游传下来的）
 	iflags *flag.FlagSet
 	// parentsPflags is all persistent flags of cmd's parents.
 	parentsPflags *flag.FlagSet
@@ -181,9 +192,10 @@ type Command struct {
 		called bool
 	}
 
-	ctx context.Context
+	ctx context.Context // 更多的是为了让使用者拥有通过 cobra.Command.ctx 在不同 package 之间传递信息的能力, 而不是 cobra 内部使用
 
 	// commands is the list of commands supported by this program.
+	// 当前 Command 的所有 sub-Command 都会在这里
 	commands []*Command
 	// parent is a parent command for this command.
 	parent *Command
@@ -677,10 +689,12 @@ func (c *Command) findNext(next string) *Command {
 	matches := make([]*Command, 0)
 	for _, cmd := range c.commands {
 		if cmd.Name() == next || cmd.HasAlias(next) {
+			// BFS 找到下一层
 			cmd.commandCalledAs.name = next
 			return cmd
 		}
 		if EnablePrefixMatching && cmd.hasNameOrAliasPrefix(next) {
+			// 默认是关闭的
 			matches = append(matches, cmd)
 		}
 	}
@@ -692,13 +706,18 @@ func (c *Command) findNext(next string) *Command {
 	return nil
 }
 
+// 因为 c.findNext(arg) 所以是 BFS, Command 的遍历是一去不回头的
+// os.Args[1:] 一个个进行处理，匹配 Command、Flag
 // Traverse the command tree to find the command, and parse args for
 // each parent.
 func (c *Command) Traverse(args []string) (*Command, []string, error) {
-	flags := []string{}
+	flags := []string{} // 当前处理了 Flag 跟相应的参数
 	inFlag := false
 
 	for i, arg := range args {
+		// --port 100
+		// -p 100
+		// --port=100
 		switch {
 		// A long flag with a space separated value
 		case strings.HasPrefix(arg, "--") && !strings.Contains(arg, "="):
@@ -722,15 +741,17 @@ func (c *Command) Traverse(args []string) (*Command, []string, error) {
 			continue
 		}
 
-		cmd := c.findNext(arg)
+		cmd := c.findNext(arg) // BFS, arg 是下一个 Command 的候选
 		if cmd == nil {
+			// 最后一个 Command，可以结束所有的遍历了
 			return c, args, nil
 		}
 
+		// 处理当前 Command 的 Flag
 		if err := c.ParseFlags(flags); err != nil {
 			return nil, args, err
 		}
-		return cmd.Traverse(args[i+1:])
+		return cmd.Traverse(args[i+1:]) // 一去不回头，处理下一个 Command 跟相应的 Flag（递归遍历）
 	}
 	return c, args, nil
 }
@@ -778,6 +799,7 @@ func (c *Command) ArgsLenAtDash() int {
 	return c.Flags().ArgsLenAtDash()
 }
 
+// 解析 Flag，运行 hook
 func (c *Command) execute(a []string) (err error) {
 	if c == nil {
 		return fmt.Errorf("Called Execute() on a nil Command")
@@ -792,7 +814,7 @@ func (c *Command) execute(a []string) (err error) {
 	c.InitDefaultHelpFlag()
 	c.InitDefaultVersionFlag()
 
-	err = c.ParseFlags(a)
+	err = c.ParseFlags(a) // 解析 Flag
 	if err != nil {
 		return c.FlagErrorFunc()(c, err)
 	}
@@ -828,10 +850,11 @@ func (c *Command) execute(a []string) (err error) {
 	}
 
 	if !c.Runnable() {
+		// 不想被运行的 Command，可以用这种方式，来打印 help 信息
 		return flag.ErrHelp
 	}
 
-	c.preRun()
+	c.preRun() // 跑 hook
 
 	argWoFlags := c.Flags().Args()
 	if c.DisableFlagParsing {
@@ -842,6 +865,7 @@ func (c *Command) execute(a []string) (err error) {
 		return err
 	}
 
+	// PersistentPreRunE() hook, 而且因为是 Persistent 所以要检查所有的 parent Command
 	for p := c; p != nil; p = p.Parent() {
 		if p.PersistentPreRunE != nil {
 			if err := p.PersistentPreRunE(c, argWoFlags); err != nil {
@@ -868,6 +892,8 @@ func (c *Command) execute(a []string) (err error) {
 		return err
 	}
 
+	// 这里其实就开始运行一个 app 的 main 函数了
+	// 而且很显然，不同的 Command、sub-Command 是可以设置不同的入口函数的
 	if c.RunE != nil {
 		if err := c.RunE(c, argWoFlags); err != nil {
 			return err
@@ -952,12 +978,13 @@ func (c *Command) ExecuteC() (cmd *Command, err error) {
 
 	// Workaround FAIL with "go test -v" or "cobra.test -test.v", see #155
 	if c.args == nil && filepath.Base(os.Args[0]) != "cobra.test" {
-		args = os.Args[1:]
+		args = os.Args[1:] // 默认情况下加载 os.Args[1:]
 	}
 
 	// initialize the hidden command to be used for shell completion
 	c.initCompleteCmd(args)
 
+	/* Flag 的处理（借助 pflag） */
 	var flags []string
 	if c.TraverseChildren {
 		cmd, flags, err = c.Traverse(args)
@@ -1158,11 +1185,13 @@ func (c *Command) Commands() []*Command {
 
 // AddCommand adds one or more commands to this parent command.
 func (c *Command) AddCommand(cmds ...*Command) {
+	// 这里 x 跟 cmds 混用，显然不太好，全部用 cmds[i] 可能更适合
 	for i, x := range cmds {
 		if cmds[i] == c {
+			// 会引发无限循环，直接禁止
 			panic("Command can't be a child of itself")
 		}
-		cmds[i].parent = c
+		cmds[i].parent = c // sub-command 记录自己的 parent-command
 		// update max lengths
 		usageLen := len(x.Use)
 		if usageLen > c.commandsMaxUseLen {
@@ -1252,7 +1281,7 @@ func (c *Command) PrintErrf(format string, i ...interface{}) {
 // CommandPath returns the full path to this command.
 func (c *Command) CommandPath() string {
 	if c.HasParent() {
-		return c.Parent().CommandPath() + " " + c.Name()
+		return c.Parent().CommandPath() + " " + c.Name() // 这里会通过递归的方式，补全全部命令内容
 	}
 	return c.Name()
 }
@@ -1504,6 +1533,7 @@ func (c *Command) LocalFlags() *flag.FlagSet {
 		c.lflags.SetNormalizeFunc(c.globNormFunc)
 	}
 
+	// addToLocal 只能每次都执行了，不然有些 Command.flags 不会同步到 Command.lflags 的
 	addToLocal := func(f *flag.Flag) {
 		if c.lflags.Lookup(f.Name) == nil && c.parentsPflags.Lookup(f.Name) == nil {
 			c.lflags.AddFlag(f)
@@ -1545,8 +1575,10 @@ func (c *Command) NonInheritedFlags() *flag.FlagSet {
 }
 
 // PersistentFlags returns the persistent FlagSet specifically set in the current command.
+// 新建一个 FlagSet，剩下的事情，就是 pflag 增加一个 Flag 了
 func (c *Command) PersistentFlags() *flag.FlagSet {
 	if c.pflags == nil {
+		// lazy 的方式进行初始化
 		c.pflags = flag.NewFlagSet(c.Name(), flag.ContinueOnError)
 		if c.flagErrorBuf == nil {
 			c.flagErrorBuf = new(bytes.Buffer)
@@ -1647,11 +1679,15 @@ func (c *Command) ParseFlags(args []string) error {
 		c.flagErrorBuf = new(bytes.Buffer)
 	}
 	beforeErrorBufLen := c.flagErrorBuf.Len()
+	// 将不同 FlagSet 的 Flag 全部 merge 到 Command.flags 准备进行统一处理
+	// 本层以及上面流下来的 Flag。parses persistent flag + local flags
 	c.mergePersistentFlags()
 
 	// do it here after merging all flags and just before parse
 	c.Flags().ParseErrorsWhitelist = flag.ParseErrorsWhitelist(c.FParseErrWhitelist)
 
+	// 其实也是借助 pflag 处理 Flags 的，
+	// 因为 Flag 遍历的内存地址已经封装进 Flag.Value 了，所以对应变量的值会被直接改变
 	err := c.Flags().Parse(args)
 	// Print warnings if they occurred (e.g. deprecated flag messages).
 	if c.flagErrorBuf.Len()-beforeErrorBufLen > 0 && err == nil {

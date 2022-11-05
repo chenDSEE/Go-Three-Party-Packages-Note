@@ -124,7 +124,6 @@ var rootCmd = &cobra.Command{
 		// Q&A: 看起来没有被 corba match 到的参数，都会在 args 里面
 		fmt.Printf("running root command[%s], args[%v]\n", cmd.Use, args)
 	},
-	TraverseChildren: true,
 }
 
 // version sub-command ========================================
