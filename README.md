@@ -8,3 +8,4 @@ Some learning note for Golang Three-Party packages.
 - log
   - [logrus(v1.9.0)](https://github.com/sirupsen/logrus/tree/v1.9.0)
   - [zap(v1.23.0)](https://github.com/uber-go/zap/tree/v1.23.0)
+  - [zerolog(v1.28.0)](https://github.com/rs/zerolog/tree/v1.28.0)

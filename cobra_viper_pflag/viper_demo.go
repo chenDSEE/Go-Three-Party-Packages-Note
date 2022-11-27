@@ -10,10 +10,10 @@ import (
 
 const (
 	// configuration file information
-	cfgName = "config_demo"
-	cfgType = "yaml"
+	cfgName     = "config_demo"
+	cfgType     = "yaml"
 	cfgFullName = cfgName + "." + cfgType
-	cfgPath = "." // in the working directory
+	cfgPath     = "." // in the working directory
 )
 
 // test case:
@@ -37,35 +37,35 @@ func main() {
 	//loadErrorConfig()
 	fmt.Printf("========> load config [%s] from [%s] done\n", cfgFullName, cfgPath)
 
-	fmt.Println("============= defaultValue_Demo() ===============")
-	defaultValue_Demo()
-	fmt.Println("===============================================")
-
-	fmt.Println("============= readConfig_Demo() ===============")
-	readConfig_Demo()
-	fmt.Println("===============================================")
-
-	fmt.Println("=========== accessNestedKey_Demo() ============")
-	accessNestedKey_Demo()
-	fmt.Println("===============================================")
-
-	fmt.Println("============ loadSecondCfg_Demo() =============")
-	loadSecondCfg_Demo()
-	fmt.Println("===============================================")
+	//fmt.Println("============= defaultValue_Demo() ===============")
+	//defaultValue_Demo()
+	//fmt.Println("===============================================")
+	//
+	//fmt.Println("============= readConfig_Demo() ===============")
+	//readConfig_Demo()
+	//fmt.Println("===============================================")
+	//
+	//fmt.Println("=========== accessNestedKey_Demo() ============")
+	//accessNestedKey_Demo()
+	//fmt.Println("===============================================")
+	//
+	//fmt.Println("============ loadSecondCfg_Demo() =============")
+	//loadSecondCfg_Demo()
+	//fmt.Println("===============================================")
 
 	fmt.Println("================= ENV_Demo() ==================")
 	ENV_Demo()
 	fmt.Println("===============================================")
 
-	fmt.Println("=============== deepNest_Demo() ===============")
-	deepNest_Demo()
-	fmt.Println("===============================================")
-
-	fmt.Println("=============== mapping_demo() ================")
-	mapping_demo()
-	fmt.Println("===============================================")
-
-	fmt.Println("========> demo end")
+	//fmt.Println("=============== deepNest_Demo() ===============")
+	//deepNest_Demo()
+	//fmt.Println("===============================================")
+	//
+	//fmt.Println("=============== mapping_demo() ================")
+	//mapping_demo()
+	//fmt.Println("===============================================")
+	//
+	//fmt.Println("========> demo end")
 }
 
 func loadConfig() {
@@ -90,8 +90,8 @@ func loadConfig() {
 func loadErrorConfig() {
 	errCfgName := "error" + cfgName
 	viper.SetConfigName(errCfgName) // name of config file (without extension)
-	viper.SetConfigType(cfgType) // REQUIRED if the config file does not have the extension in the name
-	viper.AddConfigPath(cfgPath) // path to look for the config file in
+	viper.SetConfigType(cfgType)    // REQUIRED if the config file does not have the extension in the name
+	viper.AddConfigPath(cfgPath)    // path to look for the config file in
 	//viper.AddConfigPath("$HOME/.appname")  // call multiple times to add many search paths
 
 	if err := viper.ReadInConfig(); err != nil {
@@ -110,9 +110,12 @@ func loadErrorConfig() {
 func defaultValue_Demo() {
 	// default value had been set before configuration file loaded
 	var key string
-	key = "default-value.key-1"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
-	key = "default-value.key-2"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
-	key = "default-value.key-3"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "default-value.key-1"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "default-value.key-2"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "default-value.key-3"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
 }
 
 func readConfig_Demo() {
@@ -131,42 +134,54 @@ func readConfig_Demo() {
 func accessNestedKey_Demo() {
 	// Accessing nested keys
 	var key string
-	key = "nest.bool-key";            fmt.Printf("%s:[%v]\n", key, viper.GetBool(key))
-	key = "nest.float64-key";         fmt.Printf("%s:[%v]\n", key, viper.GetFloat64(key))
-	key = "nest.int-key";             fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
-	key = "nest.int-slice-key";       fmt.Printf("%s:[%v]\n", key, viper.GetIntSlice(key))
-	key = "nest.int-slice-key.1";     fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "nest.bool-key"
+	fmt.Printf("%s:[%v]\n", key, viper.GetBool(key))
+	key = "nest.float64-key"
+	fmt.Printf("%s:[%v]\n", key, viper.GetFloat64(key))
+	key = "nest.int-key"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "nest.int-slice-key"
+	fmt.Printf("%s:[%v]\n", key, viper.GetIntSlice(key))
+	key = "nest.int-slice-key.1"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
 	// not panic but get zero-value get by nest.int-slice-key.5
-	key = "nest.int-slice-key.5";     fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
-	key = "nest.string-key";          fmt.Printf("%s:[%v]\n", key, viper.GetString(key))
-	key = "nest.string-slice-key";    fmt.Printf("%s:[%v]\n", key, viper.GetStringSlice(key))
-	key = "nest.duration-key-3s";     fmt.Printf("%s:[%v]\n", key, viper.GetDuration(key))
-	key = "nest.duration-key-0.5s";   fmt.Printf("%s:[%v]\n", key, viper.GetDuration(key))
-	key = "nest.duration-key-30ms";   fmt.Printf("%s:[%v]\n", key, viper.GetDuration(key))
-	key = "nest.duration-key-3000ms"; fmt.Printf("%s:[%v]\n", key, viper.GetDuration(key))
+	key = "nest.int-slice-key.5"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "nest.string-key"
+	fmt.Printf("%s:[%v]\n", key, viper.GetString(key))
+	key = "nest.string-slice-key"
+	fmt.Printf("%s:[%v]\n", key, viper.GetStringSlice(key))
+	key = "nest.duration-key-3s"
+	fmt.Printf("%s:[%v]\n", key, viper.GetDuration(key))
+	key = "nest.duration-key-0.5s"
+	fmt.Printf("%s:[%v]\n", key, viper.GetDuration(key))
+	key = "nest.duration-key-30ms"
+	fmt.Printf("%s:[%v]\n", key, viper.GetDuration(key))
+	key = "nest.duration-key-3000ms"
+	fmt.Printf("%s:[%v]\n", key, viper.GetDuration(key))
 }
 
 func loadSecondCfg_Demo() {
 	newCfgName := cfgName + "_2"
 	cfgParser := viper.New()
 	cfgParser.SetConfigName(newCfgName) // name of config file (without extension)
-	cfgParser.SetConfigType(cfgType) // REQUIRED if the config file does not have the extension in the name
-	cfgParser.AddConfigPath(cfgPath) // path to look for the config file in
+	cfgParser.SetConfigType(cfgType)    // REQUIRED if the config file does not have the extension in the name
+	cfgParser.AddConfigPath(cfgPath)    // path to look for the config file in
 	//viper.AddConfigPath("$HOME/.appname")  // call multiple times to add many search paths
 
 	if err := cfgParser.ReadInConfig(); err != nil {
 		var info string
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			// Config file not found; ignore error if desired
-			info = fmt.Sprintf("can not find [%s] in path[%s]", newCfgName + "." + cfgType, cfgPath)
+			info = fmt.Sprintf("can not find [%s] in path[%s]", newCfgName+"."+cfgType, cfgPath)
 		} else {
 			// Config file was found but another error was produced
-			info = fmt.Sprintf("find [%s] in path[%s], but something error when parsing", newCfgName + "." + cfgType, cfgPath)
+			info = fmt.Sprintf("find [%s] in path[%s], but something error when parsing", newCfgName+"."+cfgType, cfgPath)
 		}
 		panic(info)
 	}
 
-	fmt.Printf("========> load config [%s] from [%s] done\n", newCfgName + "." + cfgType, cfgPath)
+	fmt.Printf("========> load config [%s] from [%s] done\n", newCfgName+"."+cfgType, cfgPath)
 	fmt.Printf("key:[%s]\n", cfgParser.GetString("key"))
 	fmt.Printf("not-exist-key:[%s]\n", cfgParser.GetString("not-exist-keys"))
 }
@@ -174,9 +189,12 @@ func loadSecondCfg_Demo() {
 func ENV_Demo() {
 	// env already bind before configuration loaded
 	var key string
-	key = "env.k1"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
-	key = "env.k2"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
-	key = "env.k3"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "env.k1"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "env.k2"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "env.k3"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
 
 	fmt.Printf("========> set env\n")
 	_ = os.Setenv("PREFIX_ENV_K1", "20")
@@ -184,9 +202,12 @@ func ENV_Demo() {
 	//_ = os.Setenv("PREFIX_ENV_K3", "20")
 
 	// ENV variable will not cache in viper, but always access data from system
-	key = "env.k1"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
-	key = "env.k2"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
-	key = "env.k3"; fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "env.k1"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "env.k2"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
+	key = "env.k3"
+	fmt.Printf("%s:[%v]\n", key, viper.GetInt(key))
 }
 
 func deepNest_Demo() {
