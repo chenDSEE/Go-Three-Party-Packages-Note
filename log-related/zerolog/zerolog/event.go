@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+// 全部 Logger 都共用同一个 sync.Pool
+// 因为 Logger、sub-Logger 实际上创建还是比较频繁的，尤其是挂上 context
 var eventPool = &sync.Pool{
 	New: func() interface{} {
 		return &Event{
@@ -17,16 +19,20 @@ var eventPool = &sync.Pool{
 	},
 }
 
-// Event represents a log event. It is instanced by one of the level method of
-// Logger and finalized by the Msg or Msgf method.
+// Event represents a log event.（也就意味着一次日志输出）
+// It is instanced by one of the level method of
+// Logger and finalized by the Msg or Msgf method.（Event 的触发，使用要通过 Event.Msg() 或者是 Event.Msgf() 触发）
+// Event 本身是具有 level 这个属性的，但 Event 的 level 跟 Logger 的 level 并不是一回事
+// Logger 是什么 level 是看设置的；而 Event 是什么 level 是看这行日志代码用的是什么 level
+// Event 实际上是针对当前 Logger 进行了一次 snapshot
 type Event struct {
-	buf       []byte
-	w         LevelWriter
+	buf       []byte      // 保存 Logger.context 里面的内容
+	w         LevelWriter // 强制约束：每一个 Writer 都得是按 level 进行输出的
 	level     Level
-	done      func(msg string)
-	stack     bool   // enable error stack trace
-	ch        []Hook // hooks from context
-	skipFrame int    // The number of additional frames to skip when printing the caller.
+	done      func(msg string) // 完成本次 Event 的 log 输出之后执行，通常是 panic、os.Exit()
+	stack     bool             // enable error stack trace
+	ch        []Hook           // hooks from context
+	skipFrame int              // The number of additional frames to skip when printing the caller.
 }
 
 func putEvent(e *Event) {
@@ -57,7 +63,7 @@ type LogArrayMarshaler interface {
 
 func newEvent(w LevelWriter, level Level) *Event {
 	e := eventPool.Get().(*Event)
-	e.buf = e.buf[:0]
+	e.buf = e.buf[:0] // 毕竟是通过 sync.Pool 进行复用的
 	e.ch = nil
 	e.buf = enc.AppendBeginMarker(e.buf)
 	e.w = w
@@ -78,7 +84,7 @@ func (e *Event) write() (err error) {
 			_, err = e.w.WriteLevel(e.level, e.buf)
 		}
 	}
-	putEvent(e)
+	putEvent(e) // 回收 Event
 	return
 }
 
@@ -101,6 +107,7 @@ func (e *Event) Discard() *Event {
 //
 // NOTICE: once this method is called, the *Event should be disposed.
 // Calling Msg twice can have unexpected result.
+// 之所以这么短，是为了 inline fast-path 加速
 func (e *Event) Msg(msg string) {
 	if e == nil {
 		return
@@ -138,6 +145,7 @@ func (e *Event) MsgFunc(createMsg func() string) {
 
 func (e *Event) msg(msg string) {
 	for _, hook := range e.ch {
+		// time
 		hook.Run(e, e.level, msg)
 	}
 	if msg != "" {
@@ -227,6 +235,7 @@ func (e *Event) Object(key string, obj LogObjectMarshaler) *Event {
 }
 
 // Func allows an anonymous func to run only if the event is enabled.
+// 一个 Log 颗粒度的 hook
 func (e *Event) Func(f func(e *Event)) *Event {
 	if e != nil && e.Enabled() {
 		f(e)

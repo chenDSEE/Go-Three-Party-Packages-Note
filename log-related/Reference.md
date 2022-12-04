@@ -1153,15 +1153,29 @@ func (f *JSONFormatter) Format(entry *Entry) ([]byte, error) {
 
 
 
+## zerolog
+
+![zerolog-overview](zerolog-overview.svg)
+
+1. 通过 `Logger` 的不同 level 函数（如：`Logger.Debug()`），生成相应 level 的 `Event` 并对此时的 `Logger` 做一次 snapshot；
+2. 然后通过 `Event` 的 method（如：`Event.Str()`, `Event.IPAddr()`，具体可以参考 `zerolog.encoder` interface），将不同的 key-value pair 序列化为 Json 的 `[]byte`，放进 `Event.buf` 里面
+3. 通过 `Event.Send()`, `Event.Msg()`, `Event.Msgf()` 触发最终 log 的刷写
 
 
 
+当多个 Goroutine 操作日志，导致创建的对象数目剧增，进而导致 GC 压力增大。形成 **"并发大 - 占用内存大 - GC 缓慢 - 处理并发能力降低 - 并发更大"**
 
 
 
+通过这个 **issue 23199[4]**了解到使用动态增长的 buffer 会导致大量内存被固定，在活锁的情况下永远不会释放。
 
 
 
+为什么整个 zerolog 里面，`[]byte` 能够用的这么顺畅，总是有一种 copy-on-write 的效果？
+
+- 写端总是通过 `append()` 的方式进行内容的追加，不会去修改已经写入 `[]byte` 里面的内容，每次进行日志输出的时候，总是从 `zerolog.Logger.context` 中将内容独立 deep copy 到 `Event.buf` 里面；链式调用总是针对这个独立的 `Event` 进行，不影响原本的 `zerolog.Logger`
+- 读端总是 read-only，从不去修改 `[]byte` 的内容，也不会进行 `append()`。
+- `Logger` 大部分涉及到字段改变的 method 都是采用 value receiver（总是 copy-on-write 的方式）
 
 
 

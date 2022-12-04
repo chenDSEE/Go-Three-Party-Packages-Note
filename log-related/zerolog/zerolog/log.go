@@ -207,14 +207,14 @@ func (l Level) MarshalText() ([]byte, error) {
 
 // A Logger represents an active logging object that generates lines
 // of JSON output to an io.Writer. Each logging operation makes a single
-// call to the Writer's Write method. There is no guarantee on access
-// serialization to the Writer. If your Writer is not thread safe,
+// call to the Writer's Write method. 每一个 logging 动作，都会调用一次底层 io.Writer 的 Write() 一次
+// There is no guarantee on access serialization to the Writer. If your Writer is not thread safe,
 // you may consider a sync wrapper.
 type Logger struct {
-	w       LevelWriter
+	w       LevelWriter // 日志输出
 	level   Level
 	sampler Sampler
-	context []byte
+	context []byte // 打包成数据数据的上下文信息(注意是 []byte)，并不是 Context package 的 Context
 	hooks   []Hook
 	stack   bool
 }
@@ -223,11 +223,16 @@ type Logger struct {
 // the LevelWriter interface, the WriteLevel method will be called instead of the Write
 // one.
 //
+// 大部分通过 fd 来进行文件读写的其实都不需要担心这个并发问题，因为文件的读写本身的并发安全的
+// 但是走 TCP 的 remote log 保存，就需要叠加一层 TCP socket buffer 确保 half-write 时的并发问题了
 // Each logging operation makes a single call to the Writer's Write method. There is no
 // guarantee on access serialization to the Writer. If your Writer is not thread safe,
 // you may consider using sync wrapper.
+// 将一个 io.Writer 裹成一个 Logger struct
 func New(w io.Writer) Logger {
 	if w == nil {
+		// Discard is an io.Writer on which all Write calls succeed
+		// without doing anything. 其实是直接 drop 的
 		w = ioutil.Discard
 	}
 	lw, ok := w.(LevelWriter)
@@ -259,17 +264,20 @@ func (l Logger) Output(w io.Writer) Logger {
 }
 
 // With creates a child logger with the field added to its context.
+// 通过 zerolog.Context struct 对原本的 Logger 进行一次 deep copy
+// 注意！这个函数采用的是 logger receiver，每次调用都影响原本的 Logger，原 Logger 总是 read-only 的
 func (l Logger) With() Context {
 	context := l.context
-	l.context = make([]byte, 0, 500)
+	l.context = make([]byte, 0, 500) // 包含 500 bytes 的一块内存 buffer
 	if context != nil {
 		l.context = append(l.context, context...)
 	} else {
+		// 第一次初始化
 		// This is needed for AppendKey to not check len of input
 		// thus making it inlinable
 		l.context = enc.AppendBeginMarker(l.context)
 	}
-	return Context{l}
+	return Context{l} // 新的 Logger，是原 Logger 的 deep copy 诞生出来的
 }
 
 // UpdateContext updates the internal logger's context.
@@ -441,9 +449,11 @@ func (l Logger) Write(p []byte) (n int, err error) {
 	return
 }
 
+// Event 实际上是针对当前 Logger 进行了一次 snapshot
 func (l *Logger) newEvent(level Level, done func(string)) *Event {
 	enabled := l.should(level)
 	if !enabled {
+		// 该 level 不需要进行日志，或 log 功能是 disable 的
 		if done != nil {
 			done("")
 		}
@@ -456,6 +466,7 @@ func (l *Logger) newEvent(level Level, done func(string)) *Event {
 		e.Str(LevelFieldName, LevelFieldMarshalFunc(level))
 	}
 	if l.context != nil && len(l.context) > 1 {
+		// 在 Event.buf 里面保存 Logger 中的 context 内容
 		e.buf = enc.AppendObjectData(e.buf, l.context)
 	}
 	if l.stack {

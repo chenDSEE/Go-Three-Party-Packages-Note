@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// encoder interface 仅仅是作为一个契约，约定每一个作为 zerolog encoder 的都得实现下面的 method
+// 但是这个 interface 并没有被实际作为抽象出现在任何地方（成员变量、函数签名）
 type encoder interface {
 	AppendArrayDelim(dst []byte) []byte
 	AppendArrayEnd(dst []byte) []byte

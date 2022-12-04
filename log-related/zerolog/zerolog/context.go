@@ -9,6 +9,24 @@ import (
 )
 
 // Context configures a new sub-logger with contextual fields.
+// Q&A(DONE): zerolog.Context 是出于什么目的才这么封装的？
+// 这其实需要对比 Event.buf 跟 zerolog.Context.l.context
+// Event.buf 是先针对 Logger 做一次 snapshot（Logger.context 也 copy 了出来），
+// 然后不断追加本次日志需要的内容
+// zerolog.Context 不一样，通过 zerolog.Context 加入的内容，
+// 是会被直接写入 zerolog.Logger.context 这个 []byte 里面的。而这里面的内容，
+// 在每次输出日志的时候，则会被 Event 再次 copy 一次
+//
+// Event 的 type API，zerolog.Context 基本都有
+// 不同的是：
+// Event 是 pointer receiver；
+// zerolog.Context 是 value receiver；
+// 这其实也就意味着：每次使用 zerolog.Context 的 method，
+// 总是生成一个新的 zerolog.Context 跟新的 zerolog.Logger
+// 这是出于 copy-on-wirte 的考虑才这么做的，这样每个 Context 之间就不会相互影响
+// （zerolog.Logger.context []byte 都是独立的，这一点只能发生在 zerolog.Logger.With() 之后，
+// 其他不断返回的 zerolog.Context 的 zerolog.Context method 并不会保证这一点！）
+// 另外，zerolog.Context 的创建频率是远低于 zerolog.Event 的
 type Context struct {
 	l Logger
 }

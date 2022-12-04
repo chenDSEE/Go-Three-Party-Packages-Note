@@ -12,11 +12,24 @@ import (
 
 // LevelWriter defines as interface a writer may implement in order
 // to receive level information with payload.
+// Q&A(DONE): WriteLevel() 跟 zerolog.LevelWriter interface 是想干什么的？
+// 强制约束：每一个 Writer 都得是按 level 进行输出的
+// 首先你要注意，zerolog.Event 中的 w 就是一个 LevelWriter
+// 这其实就要求了：通过 Event 触发的 log 输出，必须要判断 level 是否满足
+//
+// 如果你使用了 zerolog 提供的 API 进行日志输出，创建 Event 的时候，就已经判断过 level 了，
+// 也就不需要在 WriteLevel() 判断一次 level 了
+// 这也是为什么 zerolog.New() 函数中，直接将 io.Writer 利用 levelWriterAdapter 裹一下就完事了
+// 而且 levelWriterAdapter.WriteLevel() 还什么事都不干。
+//
+// 但是 syslogWriter 不一样，syslog 的 level 跟 zerolog 的 level 是不一致的，
+// 这时候就要利用这个 LevelWriter.WriteLevel() 进行 level 的对接
 type LevelWriter interface {
 	io.Writer
 	WriteLevel(level Level, p []byte) (n int, err error)
 }
 
+// 辅助其他没有 impl zerolog.LevelWriter interface 的 io.Writer
 type levelWriterAdapter struct {
 	io.Writer
 }
